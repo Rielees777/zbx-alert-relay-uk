@@ -1,0 +1,17 @@
+type: Deployment
+strategy:
+  type: Recreate
+containers:
+  zbx-alert-relay-uk:
+    name: zbx-alert-relay-uk
+    repository: ""
+    tag: ""
+    runAsUser: 65534
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+readOnlyRootFilesystem: "true"
+env: {}

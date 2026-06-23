@@ -1,0 +1,100 @@
+##########
+# Подключение общих компонентов. Документация https://confluence.sovcombank.ru/pages/viewpage.action?pageId=331431457
+# Для обсуждения доработок шаблонов прошу связаться с group_DevOpsIVR@sovcombank.ru или по форме DevOps ДБТ > Консультация https://pyrus.sovcombank.ru/t#uf340482
+##########
+include:
+  - component: gitlab.sovcombank.group/devops-dbt/components/templates/default@2.6.2
+  - component: gitlab.sovcombank.group/devops-dbt/components/stands/test@1.1.0
+    inputs:
+      context: "TEST_NEW"
+  - component: gitlab.sovcombank.group/devops-dbt/components/stands/prod@1.1.0
+    inputs:
+      context: "BACK"
+  - component: gitlab.sovcombank.group/devops-dbt/components/templates/build@2.6.2
+  - component: gitlab.sovcombank.group/devops-dbt/components/templates/scan@2.6.2
+  - component: gitlab.sovcombank.group/devops-dbt/components/templates/k8s@2.6.2
+    inputs:
+      chart: "3.1.0"
+      vault-path: $CI_PROJECT_ROOT_NAMESPACE/$CI_PROJECT_NAME
+  - component: gitlab.sovcombank.group/devops-dbt/components/jobs/test@2.0.0
+    inputs:
+      build-rules:
+        - if: "$CI_COMMIT_BRANCH =~ /^devops.*$/"
+          when: manual
+        - if: $CI_COMMIT_REF_NAME == "test"
+          when: manual
+        - when: never
+      scan-rules:
+        - when: never
+      deploy-rules:
+        - if: "$CI_COMMIT_BRANCH =~ /^devops.*$/"
+          when: manual
+        - if: $CI_COMMIT_REF_NAME == "test"
+          when: manual
+        - when: never
+      deploy-needs:
+        - job: Build App Test
+      cleanup-rules:
+        - if: "$CI_COMMIT_BRANCH =~ /^devops.*$/"
+          when: manual
+        - if: $CI_COMMIT_REF_NAME == "test"
+          when: manual
+        - when: never
+  - component: gitlab.sovcombank.group/devops-dbt/components/jobs/prod@2.0.0
+    inputs:
+      build-rules:
+        - if: $CI_COMMIT_REF_NAME == "main"
+          when: manual
+        - if: $CI_COMMIT_REF_NAME == "master"
+          when: manual
+        - when: never
+      scan-rules:
+        - when: never
+      deploy-rules:
+        - if: $CI_COMMIT_REF_NAME == "main"
+          when: manual
+        - if: $CI_COMMIT_REF_NAME == "master"
+          when: manual
+        - when: never
+      deploy-needs:
+        - job: Build App Prod
+      cleanup-rules:
+        - if: $CI_COMMIT_REF_NAME == "main"
+          when: manual
+        - if: $CI_COMMIT_REF_NAME == "master"
+          when: manual
+        - when: never
+
+stages: [build, test, scan, deploy, cleanup]
+
+##########
+# Глобальные переменные на весь процесс ci/cd
+##########
+variables:
+  GROUP_NAME: devnetops-rd
+  PROJECT_NAME: $CI_PROJECT_NAME
+  IMAGE_NAME: $CI_REGISTRY/$GROUP_NAME/$PROJECT_NAME
+  SCAN_PROJECT_NAME: $PROJECT_NAME
+  IMAGE_TAG: $CI_PIPELINE_IID
+  VAULT_URL: "https://vaultapi.sovcombank.group"
+  DEBUG: "false"
+  IS_SECRETS: "true"
+  VAULT_VER: "v2"
+
+
+test:
+  stage: test
+  image: ${IMAGE_NAME}:${IMAGE_TAG}
+  script:
+    python -m pytest -v ${PYTEST_FILES}
+  tags:
+    - autotest 
+  rules:
+    - if: "$CI_COMMIT_BRANCH =~ /^devops.*$/"
+      when: manual
+    - if: $CI_COMMIT_REF_NAME == "test"
+      when: manual
+    - if: $CI_COMMIT_REF_NAME == "main"
+      when: manual
+    - if: $CI_COMMIT_REF_NAME == "master"
+      when: manual
