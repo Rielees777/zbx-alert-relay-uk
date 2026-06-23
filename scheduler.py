@@ -79,7 +79,7 @@ async def main() -> None:
     scheduler.add_job(
         check_rpm,
         trigger="interval",
-        minutes=5,
+        seconds=10,
         args=[settings, bot],
         id="rpm_check",
         max_instances=1,
