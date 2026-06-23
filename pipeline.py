@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def run(zabbix_api, junos_api) -> list[IncidentReport]:
     problems = _collect_problems(zabbix_api, ACTIVE_MINUTES)
     if not problems:
-        logger.info("Активных RPM-проблем не найдено.")
+        logger.debug("Активных RPM-проблем не найдено.")
         return []
 
     logger.info("Найдено RPM-проблем: %d", len(problems))

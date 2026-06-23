@@ -37,7 +37,7 @@ def _sync_pipeline(settings: Settings) -> list[IncidentReport]:
 
 
 async def check_rpm(settings: Settings, bot: Bot) -> None:
-    logger.info("▶ Запуск RPM-проверки")
+    logger.debug("▶ Запуск RPM-проверки")
     try:
         reports = await asyncio.to_thread(_sync_pipeline, settings)
     except Exception as exc:
@@ -45,7 +45,7 @@ async def check_rpm(settings: Settings, bot: Bot) -> None:
         return
 
     if not reports:
-        logger.info("Активных RPM-проблем не найдено.")
+        logger.debug("Активных RPM-проблем не найдено.")
         return
 
     print_incident_reports(reports)
