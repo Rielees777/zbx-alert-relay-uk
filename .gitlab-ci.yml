@@ -71,7 +71,7 @@ stages: [build, test, scan, deploy, cleanup]
 # Глобальные переменные на весь процесс ci/cd
 ##########
 variables:
-  GROUP_NAME: devnetops-rd
+  GROUP_NAME: devnetops-uk
   PROJECT_NAME: $CI_PROJECT_NAME
   IMAGE_NAME: $CI_REGISTRY/$GROUP_NAME/$PROJECT_NAME
   SCAN_PROJECT_NAME: $PROJECT_NAME
