@@ -28,7 +28,8 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
-
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+logging.getLogger("pyzabbix").setLevel(logging.WARNING)
 
 def _sync_pipeline(settings: Settings) -> list[IncidentReport]:
     with ZabbixApi(settings.zabbix_config()) as zapi:
