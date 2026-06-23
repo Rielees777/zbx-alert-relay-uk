@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from const import COD, CODs
+from const import COD, CODs, MIN_ALERT_AGE_MINUTES
 from models import RpmProblem
 from zabbix.client import ZabbixClient
 
@@ -19,7 +19,13 @@ class ZabbixProblems(ZabbixClient):
     ) -> list[RpmProblem]:
         self._ensure_connected()
         events = self._fetch_events(pattern, minutes)
-        active = [e for e in events if e.get("r_eventid", "0") == "0"]
+        min_age = MIN_ALERT_AGE_MINUTES * 60
+        now = time.time()
+        active = [
+            e for e in events
+            if e.get("r_eventid", "0") == "0"
+            and now - int(e.get("clock", 0)) >= min_age
+        ]
         if not active:
             return []
 
