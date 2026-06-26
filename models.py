@@ -37,6 +37,7 @@ class RpmProblem:
     ip:        str
     cod_name:  str | None
     cod_ip:    str | None
+    provider:  str | None
     severity:  int
     started:   int
     resolved:  int

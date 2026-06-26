@@ -29,7 +29,7 @@ def format_degradation_message(report: IncidentReport) -> str:
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
-    operator = cod.operator if cod and cod.operator else p.cod_name or "—"
+    operator = p.provider or (cod.operator if cod and cod.operator else p.cod_name) or "—"
     contract = cod.contract if cod and cod.contract else "—"
     address  = p.host_name or "—"
 
@@ -57,7 +57,7 @@ def format_channel_down_message(report: IncidentReport) -> str:
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
-    operator = cod.operator if cod and cod.operator else p.cod_name or "—"
+    operator = p.provider or (cod.operator if cod and cod.operator else p.cod_name) or "—"
     contract = cod.contract if cod and cod.contract else "—"
     address  = p.host_name or "—"
 

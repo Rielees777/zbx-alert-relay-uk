@@ -98,7 +98,6 @@ async def main() -> None:
         logger.info("Получен сигнал остановки.")
     finally:
         scheduler.shutdown(wait=False)
-        await bot.close()
         logger.info("Планировщик остановлен.")
 
 

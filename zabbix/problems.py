@@ -43,9 +43,12 @@ class ZabbixProblems(ZabbixClient):
         ip_by_host:     dict[str, str],
         resolved_clock: int,
     ) -> list[RpmProblem]:
-        parts = (event.get("name") or "").split()
-        node  = parts[3] if len(parts) > 3 else ""
-        cod   = self._define_cod(node) if node else None
+        parts    = (event.get("name") or "").split()
+        node_str = parts[3] if len(parts) > 3 else ""
+        segments = node_str.split("-") if node_str else []
+        cod_key  = segments[0] if segments else ""
+        provider = segments[1] if len(segments) > 1 else None
+        cod      = self._define_cod(cod_key) if cod_key else None
 
         result: list[RpmProblem] = []
         for h in event.get("hosts", []):
@@ -56,11 +59,12 @@ class ZabbixProblems(ZabbixClient):
                 ip=ip_by_host.get(h["hostid"], ""),
                 cod_name=cod.name if cod else None,
                 cod_ip=cod.ip   if cod else None,
+                provider=provider,
                 severity=int(event.get("severity", 0)),
                 started=int(event.get("clock", 0)),
                 resolved=resolved_clock,
             ))
-        return result
+        return result 
 
     @staticmethod
     def _define_cod(node: str) -> COD | None:
