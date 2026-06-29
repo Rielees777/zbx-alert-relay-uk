@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
-
+from pydantic import BaseModel, Field as PydanticField
 
 SEVERITY_LABELS: dict[int, str] = {
     0: "Не классиф.",
@@ -27,6 +27,8 @@ class ZabbixConfig:
     @property
     def use_token(self) -> bool:
         return bool(self.api_token)
+
+
 
 
 @dataclass
@@ -71,6 +73,36 @@ class PingResult:
     @property
     def has_loss(self) -> bool:
         return self.loss is not None and self.loss > 0
+
+
+class ChannelInfo(BaseModel):
+    """Одна строка таблицы каналов связи из реестра Pyrus"""
+    provider:   str | None = None   # название провайдера
+    channel_id: str | None = None
+    bandwidth:  int | None = None   # Кбит/с
+    contract:   str | None = None   # номер договора
+    ip_address: str | None = None
+    technology: str | None = None
+
+
+class PyrusSite(BaseModel):
+    """Одна задача реестра каналов связи из Pyrus"""
+    task_id:          int
+    directorate:      str | None = None
+    zabbix_hostname:  str | None = None   # прямой ключ матчинга
+    address:          str | None = None
+    address_source:   str | None = None
+    city:             str | None = None
+    channels: list[ChannelInfo] = PydanticField(default_factory=list)
+
+    @property
+    def is_uk(self) -> bool:
+        return bool(self.directorate and self.directorate.startswith("УК-"))
+
+    @property
+    def match_key(self) -> str | None:
+        h = (self.zabbix_hostname or "").strip()
+        return h if h and h != "-" else None
 
 
 class IncidentDecision(str, Enum):
