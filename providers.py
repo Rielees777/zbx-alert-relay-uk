@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+PROVIDER_ALIASES: dict[str, str] = {
+    # МТС
+    "mts":                   "МТС",
+    "мтс":                   "МТС",
+    "мобильные телесистемы": "МТС",
+
+    # МегаФон
+    "megafon":               "МегаФон",
+    "мегафон":               "МегаФон",
+
+    # ВымпелКом / Билайн
+    "beeline":               "ВымпелКом",
+    "vimpelcom":             "ВымпелКом",
+    "вымпелком":             "ВымпелКом",
+
+    # Ростелеком
+    "rt":                    "Ростелеком",
+    "ртк":                   "Ростелеком",
+    "ростелеком":            "Ростелеком",
+    "rostelecom":            "Ростелеком",
+
+    # ТТК
+    "ttk":                   "ТТК",
+    "ттк":                   "ТТК",
+    "транстелеком":          "ТТК",
+
+    # МегаКом
+    "megacom":               "МегаКом",
+    "мегаком":               "МегаКом",
+    "мегаком-ит":            "МегаКом",
+}
+
+
+def normalize_provider(raw: str | None) -> str | None:
+    """
+    Нормализует любое написание провайдера → каноническое имя.
+    'ttk' → 'ТТК',  'ПАО МобильныеТелеСистемы' → 'МТС'.
+    Возвращает None если raw пустой, иначе canonical или raw.strip().
+    """
+    if not raw:
+        return None
+
+    key = raw.lower().replace("ё", "е")
+    key = re.sub(r'\b(пао|оао|ооо|зао|ао)\b', '', key)
+    key = re.sub(r'["\'\«\»]', '', key)
+    key = re.sub(r'\s+', ' ', key).strip()
+
+    if key in PROVIDER_ALIASES:
+        return PROVIDER_ALIASES[key]
+
+    for alias, canonical in PROVIDER_ALIASES.items():
+        if alias in key:
+            return canonical
+
+    logger.debug("Неизвестный провайдер: %r — добавьте в PROVIDER_ALIASES", raw)
+    return raw.strip()
