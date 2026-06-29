@@ -31,16 +31,17 @@ class ZabbixConfig:
 
 @dataclass
 class RpmProblem:
-    eventid:   str
-    host_name: str
-    host_tech: str
-    ip:        str
-    cod_name:  str | None
-    cod_ip:    str | None
-    provider:  str | None
-    severity:  int
-    started:   int
-    resolved:  int
+    eventid:      str
+    host_name:    str
+    host_tech:    str
+    ip:           str
+    cod_name:     str | None
+    cod_ip:       str | None
+    provider:     str | None
+    severity:     int
+    started:      int
+    resolved:     int
+    trigger_name: str = ""
 
     @property
     def is_active(self) -> bool:

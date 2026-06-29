@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     token:      str
     verify_ssl: bool = True
 
+    # Pyrus (PYRUS_*)
+    pyrus_login:   str = Field("", validation_alias=AliasChoices("PYRUS_LOGIN",   "pyrus_login"))
+    pyrus_token:   str = Field("", validation_alias=AliasChoices("PYRUS_TOKEN",   "pyrus_token"))
+    pyrus_form_id: int = Field(0,  validation_alias=AliasChoices("PYRUS_FORM_ID", "pyrus_form_id"))
+
     # Juniper / PyEZ (JUNOS_*)
     junos_user:     str = Field("",  validation_alias=AliasChoices("JUNOS_USER",     "junos_user"))
     junos_password: str = Field("",  validation_alias=AliasChoices("JUNOS_PASSWORD", "junos_password"))

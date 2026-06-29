@@ -14,7 +14,7 @@ from models import IncidentDecision, IncidentReport, RpmProblem
 logger = logging.getLogger(__name__)
 
 
-def run(zabbix_api, junos_api) -> list[IncidentReport]:
+def run(zabbix_api, junos_api, matcher=None) -> list[IncidentReport]:
     problems = _collect_problems(zabbix_api, ACTIVE_MINUTES)
     if not problems:
         logger.debug("Активных RPM-проблем не найдено.")
@@ -24,6 +24,7 @@ def run(zabbix_api, junos_api) -> list[IncidentReport]:
     reports: list[IncidentReport] = []
     for problem in problems:
         report = _process_problem(zabbix_api, junos_api, problem)
+        _attach_pyrus(report, matcher)
         reports.append(report)
         _log_report(report)
     return reports
@@ -102,6 +103,20 @@ def _handle_l2vpn_ok(junos_api, report: IncidentReport) -> None:
         logger.info("L2VPN и IPSEC без потерь: host=%s → FALSE_POSITIVE", report.problem.host_name)
         report.decision = IncidentDecision.FALSE_POSITIVE
 
+
+def _attach_pyrus(report: IncidentReport, matcher) -> None:
+    if not matcher:
+        return
+    site = matcher.find(report.problem.host_name)
+    if site:
+        report.pyrus_site    = site
+        report.pyrus_channel = matcher.find_channel(site, report.problem.trigger_name)
+        logger.debug("Pyrus matched: host=%s → task:%d channel:%s contract:%s",
+                     report.problem.host_name, site.task_id,
+                     report.pyrus_channel.provider if report.pyrus_channel else None,
+                     report.pyrus_channel.contract if report.pyrus_channel else None)
+    else:
+        logger.warning("Pyrus: нет совпадения для хоста %s", report.problem.host_name)
 
 def _check_channel_utilization(zabbix_api, problem: RpmProblem) -> float | None:
     # TODO: реализовать поиск интерфейса через Zabbix API.
