@@ -88,6 +88,7 @@ class PyrusSiteParser:
                 bandwidth  = cls._cell_int(cells, cid=44),
                 contract   = cls._cell_text(cells, cid=46),
                 ip_address = cls._cell_text(cells, cid=47),
+                service    = cls._cell_choice(cells, cid=49),
                 technology = cls._cell_catalog(cells, cid=50, col=1),
             )
             if ch.provider or ch.channel_id:
@@ -128,6 +129,16 @@ class PyrusSiteParser:
         c = cells.get(cid)
         try:
             v = c["value"]["values"][col]
+            return v.strip() if v and v.strip() not in ("", "-") else None
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    @staticmethod
+    def _cell_choice(cells: dict, cid: int) -> str | None:
+        """Ячейка-выпадающее меню (multiple_choice): берём первый выбранный пункт."""
+        c = cells.get(cid)
+        try:
+            v = c["value"]["choice_names"][0]
             return v.strip() if v and v.strip() not in ("", "-") else None
         except (KeyError, IndexError, TypeError):
             return None

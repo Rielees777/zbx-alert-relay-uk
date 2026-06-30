@@ -82,7 +82,8 @@ class ChannelInfo(BaseModel):
     bandwidth:  int | None = None   # Кбит/с
     contract:   str | None = None   # номер договора
     ip_address: str | None = None
-    technology: str | None = None
+    service:    str | None = None   # услуга: Интернет / L2VPN / Тёмное волокно / P2P (cell 49)
+    technology: str | None = None   # технология подключения: ВОЛС / Ethernet … (cell 50)
 
 
 class PyrusSite(BaseModel):

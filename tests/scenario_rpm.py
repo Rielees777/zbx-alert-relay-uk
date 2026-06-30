@@ -210,9 +210,11 @@ def _pyrus_matcher_offline():
             city="Саратов",
             channels=[
                 ChannelInfo(provider="ТТК", channel_id="TTK-L2VPN-1", bandwidth=100000,
-                            contract="ДГ-2024/00567", ip_address="10.70.138.245", technology="L2VPN"),
+                            contract="ДГ-2024/00567", ip_address="10.70.138.245",
+                            service="L2VPN", technology="ВОЛС"),
                 ChannelInfo(provider="ТТК", channel_id="TTK-NET-1", bandwidth=50000,
-                            contract="ДГ-2024/00999", ip_address="10.70.138.246", technology="Интернет"),
+                            contract="ДГ-2024/00999", ip_address="10.70.138.246",
+                            service="Интернет", technology="Ethernet"),
             ],
         ),
         PyrusSite(
@@ -224,7 +226,8 @@ def _pyrus_matcher_offline():
             city="Москва",
             channels=[
                 ChannelInfo(provider="Ростелеком", channel_id="RT-L2VPN-1", bandwidth=200000,
-                            contract="ДГ-2024/01000", ip_address="10.50.60.70", technology="L2VPN"),
+                            contract="ДГ-2024/01000", ip_address="10.50.60.70",
+                            service="L2VPN", technology="ВОЛС"),
             ],
         ),
     ]
@@ -294,8 +297,8 @@ def _dump_site(site) -> None:
     print(f"        адрес          : {site.address}")
     print(f"        каналов        : {len(site.channels)}")
     for ch in site.channels:
-        print(f"          • провайдер={ch.provider} | услуга={ch.technology} | "
-              f"договор={ch.contract} | {ch.bandwidth} Кбит/с")
+        print(f"          • провайдер={ch.provider} | услуга={ch.service} | "
+              f"технология={ch.technology} | договор={ch.contract} | {ch.bandwidth} Кбит/с")
 
 
 # ───────────────────────── Прогон сценария ─────────────────────────────────

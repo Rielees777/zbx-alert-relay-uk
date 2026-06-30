@@ -67,12 +67,13 @@ def find_channel_by_trigger(
         return None
 
     # Тип услуги из триггера (l2vpn) — обязательное условие: подставляем
-    # договор только того канала, чья услуга совпадает. Чужой договор
-    # (напр. интернет-канал того же провайдера) не используем.
+    # договор только того канала, чья услуга (колонка «Услуга», cell 49)
+    # совпадает. Чужой договор (напр. интернет-канал того же провайдера)
+    # не используем.
     if trigger.channel_type:
         typed = [
             ch for ch in matches
-            if ch.technology and trigger.channel_type.lower() in ch.technology.lower()
+            if ch.service and trigger.channel_type.lower() in ch.service.lower()
         ]
         return typed[0] if typed else None
 
