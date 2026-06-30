@@ -128,6 +128,8 @@ class IncidentReport:
     utilization_pct: float | None            = None
     decision:        IncidentDecision | None = None
     error:           str | None              = None
+    pyrus_site:      PyrusSite | None         = None
+    pyrus_channel:   ChannelInfo | None       = None
 
     @property
     def has_loss(self) -> bool:
