@@ -6,5 +6,4 @@ aiohttp>=3.9
 expiringdict>=1.2
 six>=1.16
 junos-eznc>=2.6
-rapidfuzz>=3.0
 requests>=2.31

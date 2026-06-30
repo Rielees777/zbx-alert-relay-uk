@@ -25,12 +25,22 @@ async def send_notification(bot: Bot, chat_id: str, text: str) -> None:
         logger.error("Ошибка отправки уведомления: %s", exc)
 
 
+def _contract(report: IncidentReport, cod) -> str:
+    """Номер договора: сначала из канала Pyrus, затем из COD, иначе прочерк."""
+    channel = report.pyrus_channel
+    if channel and channel.contract:
+        return channel.contract
+    if cod and cod.contract:
+        return cod.contract
+    return "—"
+
+
 def format_degradation_message(report: IncidentReport) -> str:
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
     operator = p.provider or (cod.operator if cod and cod.operator else p.cod_name) or "—"
-    contract = cod.contract if cod and cod.contract else "—"
+    contract = _contract(report, cod)
     address  = p.host_name or "—"
 
     loss_pct = _avg_loss_pct(report.ping_results)
@@ -58,7 +68,7 @@ def format_channel_down_message(report: IncidentReport) -> str:
     cod = get_cod_by_name(p.cod_name)
 
     operator = p.provider or (cod.operator if cod and cod.operator else p.cod_name) or "—"
-    contract = cod.contract if cod and cod.contract else "—"
+    contract = _contract(report, cod)
     address  = p.host_name or "—"
 
     return (

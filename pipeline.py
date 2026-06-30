@@ -107,7 +107,7 @@ def _handle_l2vpn_ok(junos_api, report: IncidentReport) -> None:
 def _attach_pyrus(report: IncidentReport, matcher) -> None:
     if not matcher:
         return
-    site = matcher.find(report.problem.host_name)
+    site = matcher.find(report.problem.ip)
     if site:
         report.pyrus_site    = site
         report.pyrus_channel = matcher.find_channel(site, report.problem.trigger_name)
