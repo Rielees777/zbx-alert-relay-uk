@@ -224,17 +224,17 @@ def _pyrus_matcher_offline():
     return RegistryMatcher(sites), sites
 
 
-def _pick_target(sites):
-    """Берём задачу с IP роутера и подходящим каналом (ТТК + l2vpn)."""
-    from trigger_parser import find_channel_by_trigger
-
-    for s in sites:
-        if s.ip_key and find_channel_by_trigger(TRIGGER_NAME, s):
-            return s
-    for s in sites:                       # запасной вариант — любая с IP
-        if s.ip_key:
-            return s
-    return None
+def _dump_site(site) -> None:
+    """Печатает данные задачи, реально полученные из Pyrus."""
+    print(f"        task_id        : {site.task_id}")
+    print(f"        дирекция       : {site.directorate}")
+    print(f"        zabbix_hostname: {site.zabbix_hostname}")
+    print(f"        router_ip      : {site.router_ip}")
+    print(f"        адрес          : {site.address}")
+    print(f"        каналов        : {len(site.channels)}")
+    for ch in site.channels:
+        print(f"          • провайдер={ch.provider} | услуга={ch.technology} | "
+              f"договор={ch.contract} | {ch.bandwidth} Кбит/с")
 
 
 # ───────────────────────── Прогон сценария ─────────────────────────────────
@@ -244,70 +244,61 @@ def main() -> int:
     from pipeline import run as run_pipeline
     from notifier import build_notification
     from report import print_incident_reports
+    from trigger_parser import find_channel_by_trigger
+
+    # «Полученные данные» — то, что приходит из Zabbix-алерта и дальше служит
+    # ключом для похода в Pyrus. IP — management-адрес железки.
+    device_ip = os.environ.get("TEST_ROUTER_IP", "10.70.138.245")
+    hostname  = os.environ.get("TEST_HOSTNAME",  "uk-srt-rabochaya145a-r")
 
     real = all(os.environ.get(k) for k in ("PYRUS_LOGIN", "PYRUS_TOKEN", "PYRUS_FORM_ID"))
 
     print("=" * 70)
     print("СЦЕНАРИЙ: обработка RPM-алерта")
-    print(f"Триггер Zabbix: {TRIGGER_NAME!r}")
+    print(f"Полученные данные: trigger={TRIGGER_NAME!r}")
+    print(f"                   device_ip={device_ip}  host={hostname}")
     print("=" * 70)
 
     if real:
         from pyrus import PyrusClient
-        print(f"\n[Pyrus] режим РЕАЛЬНЫЙ — иду на {PyrusClient.BASE_URL}")
+        print(f"\n[Pyrus] РЕАЛЬНЫЙ сервер: {PyrusClient.BASE_URL}")
         matcher, sites = _pyrus_matcher_real()
     else:
-        print("\n[Pyrus] режим OFFLINE — синтетический реестр")
-        print("        (задайте PYRUS_LOGIN/PYRUS_TOKEN/PYRUS_FORM_ID для реального сервера)")
+        print("\n[Pyrus] OFFLINE fallback — задайте PYRUS_LOGIN/PYRUS_TOKEN/PYRUS_FORM_ID,")
+        print("        чтобы скрипт сходил на реальный сервер Pyrus.")
         matcher, sites = _pyrus_matcher_offline()
 
     with_ip = sum(1 for s in sites if s.ip_key)
     uk      = sum(1 for s in sites if s.is_uk)
-    print(f"[Pyrus] задач: {len(sites)} | c IP роутера: {with_ip} | УК-*: {uk}")
+    print(f"[Pyrus] реестр получен: задач {len(sites)} | c IP роутера {with_ip} | УК-* {uk}")
 
-    # Цель сценария (IP роутера = ключ матчинга по IP)
-    ip   = os.environ.get("TEST_ROUTER_IP")
-    host = os.environ.get("TEST_HOSTNAME")
-    if not ip:
-        target = _pick_target(sites)
-        if target is None:
-            print("\n[ОШИБКА] В реестре нет задачи с IP роутера и каналом ТТК/l2vpn.")
-            print("         Задайте TEST_ROUTER_IP вручную.")
-            return 1
-        ip   = target.router_ip
-        host = target.zabbix_hostname or "test-host-r"
-    host = host or "test-host-r"
-    print(f"[Цель ]  host={host}  router_ip={ip}")
+    # ── Главный шаг: по полученному IP идём в Pyrus и забираем данные задачи ──
+    print(f"\n[Pyrus] ищу задачу по «IP-адрес роутера узла сети» = {device_ip} …")
+    site = matcher.find(device_ip)
+    if site is None:
+        print(f"[Pyrus] задача с IP {device_ip} НЕ найдена — проверьте, что поле в Pyrus заполнено.")
+    else:
+        print("[Pyrus] задача найдена, данные из Pyrus:")
+        _dump_site(site)
+        ch = find_channel_by_trigger(TRIGGER_NAME, site)
+        print(f"[Pyrus] канал под услугу l2vpn провайдера ТТК: "
+              + (f"договор={ch.contract}" if ch else "не найден → договор будет «—»"))
 
-    # 1. Синтетический алерт Zabbix → RpmProblem
-    problem = _synthetic_problem(TRIGGER_NAME, ip, host)
-    print(f"\n[Zabbix] RpmProblem: host={problem.host_name} ip={problem.ip} "
+    # ── Полный прогон пайплайна (Zabbix синт. + Junos синт. + реальный Pyrus) ─
+    problem = _synthetic_problem(TRIGGER_NAME, device_ip, hostname)
+    print(f"\n[Zabbix] синтетический RpmProblem: host={problem.host_name} ip={problem.ip} "
           f"cod={problem.cod_name} provider={problem.provider}")
 
-    # 2. Junos на синтетических данных + 3. реальный Pyrus-matcher
     junos = _synthetic_junos(problem)
     zapi  = _FakeZabbixApi([problem])
     reports = run_pipeline(zapi, junos, matcher)
 
     print_incident_reports(reports)
 
-    # Итог: матч Pyrus, договор и готовое сообщение
     for r in reports:
-        site = r.pyrus_site
-        ch   = r.pyrus_channel
         print("─" * 70)
-        if site:
-            print(f"[Pyrus]  matched task:{site.task_id}  ({site.directorate})")
-            if ch:
-                print(f"[Pyrus]  канал: провайдер={ch.provider} услуга={ch.technology} "
-                      f"договор={ch.contract}")
-            else:
-                print("[Pyrus]  канал не определён (нет ТТК/l2vpn) — договор будет «—»")
-        else:
-            print(f"[Pyrus]  совпадения по IP {problem.ip} не найдено — договор будет «—»")
-
         msg = build_notification(r)
-        print("\n--- СООБЩЕНИЕ ОПЕРАТОРУ ---")
+        print("--- СООБЩЕНИЕ ОПЕРАТОРУ ---")
         print(msg if msg else "(для этого решения сообщение не формируется)")
         print()
 
