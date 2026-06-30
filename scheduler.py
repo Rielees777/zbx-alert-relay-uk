@@ -17,8 +17,10 @@ import pipeline
 from bot import Bot
 from config import Settings
 from junos import JunosApi
+from matcher import RegistryMatcher
 from models import IncidentReport
 from notifier import build_notification, create_bot, send_notification
+from pyrus import PyrusClient, PyrusSiteParser
 from report import print_incident_reports
 from zabbix import ZabbixApi
 
@@ -31,16 +33,36 @@ logger = logging.getLogger(__name__)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 logging.getLogger("pyzabbix").setLevel(logging.WARNING)
 
-def _sync_pipeline(settings: Settings) -> list[IncidentReport]:
+def _build_matcher(settings: Settings) -> RegistryMatcher | None:
+    """Загружает реестр каналов связи из Pyrus и строит matcher по IP."""
+    if not (settings.pyrus_login and settings.pyrus_token and settings.pyrus_form_id):
+        logger.warning(
+            "Pyrus не сконфигурирован (PYRUS_LOGIN/PYRUS_TOKEN/PYRUS_FORM_ID) — "
+            "сопоставление задач отключено, договор в сообщениях будет «—».",
+        )
+        return None
+    try:
+        client = PyrusClient()
+        tasks  = client.get_registry(settings.pyrus_form_id, settings.pyrus_login, settings.pyrus_token)
+        sites  = PyrusSiteParser.parse_many(tasks)
+        matcher = RegistryMatcher(sites)
+        logger.info("Реестр Pyrus загружен: %d задач", len(sites))
+        return matcher
+    except Exception as exc:
+        logger.error("Не удалось загрузить реестр Pyrus: %s", exc)
+        return None
+
+
+def _sync_pipeline(settings: Settings, matcher: RegistryMatcher | None) -> list[IncidentReport]:
     with ZabbixApi(settings.zabbix_config()) as zapi:
         junos = JunosApi(settings)
-        return pipeline.run(zapi, junos)
+        return pipeline.run(zapi, junos, matcher)
 
 
-async def check_rpm(settings: Settings, bot: Bot) -> None:
+async def check_rpm(settings: Settings, bot: Bot, matcher: RegistryMatcher | None) -> None:
     logger.debug("▶ Запуск RPM-проверки")
     try:
-        reports = await asyncio.to_thread(_sync_pipeline, settings)
+        reports = await asyncio.to_thread(_sync_pipeline, settings, matcher)
     except Exception as exc:
         logger.error("Ошибка выполнения pipeline: %s", exc)
         return
@@ -76,12 +98,15 @@ async def main() -> None:
         proxy=settings.bot_proxy,
     )
 
+    # Реестр Pyrus загружается один раз при старте.
+    matcher = _build_matcher(settings)
+
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         check_rpm,
         trigger="interval",
         seconds=10,
-        args=[settings, bot],
+        args=[settings, bot, matcher],
         id="rpm_check",
         max_instances=1,
         coalesce=True,
@@ -90,7 +115,7 @@ async def main() -> None:
     scheduler.start()
     logger.info("Планировщик запущен. Интервал: 5 минут. Нажмите Ctrl+C для остановки.")
 
-    await check_rpm(settings, bot)  # немедленный первый запуск
+    await check_rpm(settings, bot, matcher)  # немедленный первый запуск
 
     try:
         await asyncio.Event().wait()
