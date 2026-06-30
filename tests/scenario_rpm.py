@@ -198,14 +198,14 @@ def _pyrus_matcher_offline():
             task_id=7,
             directorate="УК-Саратов",
             zabbix_hostname="uk-srt-rabochaya145a-r",
-            router_ip="10.20.30.40",
+            router_ip="10.70.138.245",   # management-IP железки из Zabbix = ключ матчинга
             address="г. Саратов, Рабочая ул дом №145а",
             city="Саратов",
             channels=[
                 ChannelInfo(provider="ТТК", channel_id="TTK-L2VPN-1", bandwidth=100000,
-                            contract="ДГ-2024/00567", ip_address="10.20.30.40", technology="L2VPN"),
+                            contract="ДГ-2024/00567", ip_address="10.70.138.245", technology="L2VPN"),
                 ChannelInfo(provider="ТТК", channel_id="TTK-NET-1", bandwidth=50000,
-                            contract="ДГ-2024/00999", ip_address="10.20.30.41", technology="Интернет"),
+                            contract="ДГ-2024/00999", ip_address="10.70.138.246", technology="Интернет"),
             ],
         ),
         PyrusSite(
