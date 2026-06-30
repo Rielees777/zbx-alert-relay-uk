@@ -184,14 +184,15 @@ def _synthetic_junos(problem):
 # ───────────────────────── Реестр Pyrus ────────────────────────────────────
 def _pyrus_matcher_real(settings):
     """Реестр Pyrus тем же путём, что и в проде (scheduler._build_matcher):
-    креды берём из Settings (config.py), а не из os.environ."""
+    креды берём из Settings (config.py), а не из os.environ.
+    Возвращает (matcher, sites, raw_tasks) — сырые задачи нужны для диагностики."""
     from matcher import RegistryMatcher
     from pyrus import PyrusClient, PyrusSiteParser
 
     client = PyrusClient()
     tasks  = client.get_registry(settings.pyrus_form_id, settings.pyrus_login, settings.pyrus_token)
     sites  = PyrusSiteParser.parse_many(tasks)
-    return RegistryMatcher(sites), sites
+    return RegistryMatcher(sites), sites, tasks
 
 
 def _pyrus_matcher_offline():
@@ -227,7 +228,61 @@ def _pyrus_matcher_offline():
             ],
         ),
     ]
-    return RegistryMatcher(sites), sites
+    return RegistryMatcher(sites), sites, []
+
+
+def _diagnose_not_found(device_ip: str, hostname: str, sites, tasks) -> None:
+    """Почему задача не нашлась по IP: где IP реально лежит в данных Pyrus."""
+    import json
+
+    print("\n[ДИАГНОСТИКА] почему не нашлось по IP:")
+
+    with_ip = [s for s in sites if s.ip_key]
+    print(f"  • распарсено router_ip (поле id 9): {len(with_ip)} из {len(sites)} задач")
+    for s in with_ip[:8]:
+        print(f"      task:{s.task_id}  router_ip={s.router_ip!r}")
+    if len(with_ip) > 8:
+        print(f"      … ещё {len(with_ip) - 8}")
+
+    in_ch = [(s.task_id, ch.ip_address) for s in sites for ch in s.channels
+             if ch.ip_address and device_ip in ch.ip_address]
+    if in_ch:
+        print(f"  • IP {device_ip} есть в ip_address каналов (cell 47): {in_ch[:5]}")
+
+    if not tasks:
+        return
+
+    # Главное: в каком поле сырых данных Pyrus реально лежит этот IP?
+    hits = []
+    for t in tasks:
+        for f in t.get("fields", []):
+            if device_ip in json.dumps(f.get("value"), ensure_ascii=False):
+                hits.append((t.get("id"), f.get("id"), f.get("name")))
+    if hits:
+        print(f"  • IP {device_ip} найден в сырых полях Pyrus (task | field_id | name):")
+        for tid, fid, name in hits[:8]:
+            print(f"      task:{tid} | field_id={fid} | {name!r}")
+        print("    → если field_id ≠ 9 — парсер берёт IP не из того поля (см. pyrus/parser.py:_text_val fid=9).")
+    else:
+        print(f"  • IP {device_ip} НЕ встречается ни в одном поле задач реестра.")
+        print("    → проверьте сам IP, либо задача не попадает в выборку формы (фильтр/архив).")
+
+    # Структура полей конкретной задачи (по hostname, иначе первой) — чтобы свериться с id поля IP
+    sample = None
+    for t in tasks:
+        for f in t.get("fields", []):
+            if f.get("id") == 8 and str(f.get("value")).strip() == (hostname or ""):
+                sample = t
+                break
+        if sample:
+            break
+    sample = sample or tasks[0]
+    print(f"  • поля задачи task:{sample.get('id')} (id | name | value):")
+    for f in sample.get("fields", []):
+        preview = json.dumps(f.get("value"), ensure_ascii=False)
+        if len(preview) > 48:
+            preview = preview[:48] + "…"
+        print(f"      {str(f.get('id')):>3} | {str(f.get('name'))[:32]:<32} | {preview}")
 
 
 def _dump_site(site) -> None:
@@ -267,7 +322,7 @@ def main() -> int:
 
     if offline:
         print("\n[Pyrus] OFFLINE (SCENARIO_OFFLINE=1) — синтетический реестр, БЕЗ похода на сервер")
-        matcher, sites = _pyrus_matcher_offline()
+        matcher, sites, tasks = _pyrus_matcher_offline()
     else:
         # Креды Pyrus — из Settings (config.py), тот же источник (.env), что и в
         # проде (scheduler._build_matcher). Никаких os.environ напрямую.
@@ -285,7 +340,7 @@ def main() -> int:
             return 2
         from pyrus import PyrusClient
         print(f"\n[Pyrus] РЕАЛЬНЫЙ сервер: {PyrusClient.BASE_URL}  (форма {settings.pyrus_form_id})")
-        matcher, sites = _pyrus_matcher_real(settings)
+        matcher, sites, tasks = _pyrus_matcher_real(settings)
 
     with_ip = sum(1 for s in sites if s.ip_key)
     uk      = sum(1 for s in sites if s.is_uk)
@@ -295,7 +350,8 @@ def main() -> int:
     print(f"\n[Pyrus] ищу задачу по «IP-адрес роутера узла сети» = {device_ip} …")
     site = matcher.find(device_ip)
     if site is None:
-        print(f"[Pyrus] задача с IP {device_ip} НЕ найдена — проверьте, что поле в Pyrus заполнено.")
+        print(f"[Pyrus] задача с IP {device_ip} НЕ найдена.")
+        _diagnose_not_found(device_ip, hostname, sites, tasks)
     else:
         print("[Pyrus] задача найдена, данные из Pyrus:")
         _dump_site(site)
