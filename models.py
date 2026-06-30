@@ -90,6 +90,7 @@ class PyrusSite(BaseModel):
     task_id:          int
     directorate:      str | None = None
     zabbix_hostname:  str | None = None   # прямой ключ матчинга
+    router_ip:        str | None = None   # IP-адрес роутера узла сети
     address:          str | None = None
     address_source:   str | None = None
     city:             str | None = None
@@ -103,6 +104,11 @@ class PyrusSite(BaseModel):
     def match_key(self) -> str | None:
         h = (self.zabbix_hostname or "").strip()
         return h if h and h != "-" else None
+
+    @property
+    def ip_key(self) -> str | None:
+        ip = (self.router_ip or "").strip()
+        return ip if ip and ip != "-" else None
 
 
 class IncidentDecision(str, Enum):

@@ -35,6 +35,7 @@ class PyrusSiteParser:
             task_id         = raw["id"],
             directorate     = cls._catalog_val(fields, fid=1, col=0),
             zabbix_hostname = cls._text_val(fields, fid=8),
+            router_ip       = cls._text_val(fields, fid=9),
             city            = cls._catalog_val(fields, fid=6, col=3),
             **cls._resolve_address(fields),
             channels        = cls._parse_channels(fields),
