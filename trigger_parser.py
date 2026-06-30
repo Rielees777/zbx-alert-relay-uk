@@ -46,11 +46,14 @@ def find_channel_by_trigger(
     """
     По имени триггера находит нужный канал в задаче Pyrus.
 
-    Алгоритм:
+    Договор для сообщения должен соответствовать и провайдеру, и типу
+    услуги (l2vpn). Алгоритм:
       1. Нормализуем провайдер из имени триггера ("ttk" → "ТТК").
-      2. Нормализуем провайдер каждого канала Pyrus и сравниваем.
-      3. Если нашли несколько каналов одного провайдера — сужаем по типу.
-      4. Фолбэк — первый совпавший канал.
+      2. Оставляем каналы того же провайдера.
+      3. Если в триггере указан тип услуги (l2vpn/ipsec) — берём только
+         канал с этой услугой; иначе договор не подставляем.
+      4. Если тип услуги в триггере не указан — подставляем договор только
+         при единственном канале провайдера (иначе выбор неоднозначен).
     """
     trigger = TriggerInfo(trigger_name)
     if not trigger.provider or not site.channels:
@@ -60,20 +63,17 @@ def find_channel_by_trigger(
         ch for ch in site.channels
         if normalize_provider(ch.provider) == trigger.provider
     ]
-
     if not matches:
         return None
 
-    if len(matches) == 1:
-        return matches[0]
-
-    # Несколько каналов одного провайдера — уточняем по типу (l2vpn, ipsec, …)
+    # Тип услуги из триггера (l2vpn) — обязательное условие: подставляем
+    # договор только того канала, чья услуга совпадает. Чужой договор
+    # (напр. интернет-канал того же провайдера) не используем.
     if trigger.channel_type:
-        narrowed = [
+        typed = [
             ch for ch in matches
             if ch.technology and trigger.channel_type.lower() in ch.technology.lower()
         ]
-        if narrowed:
-            return narrowed[0]
+        return typed[0] if typed else None
 
-    return matches[0]
+    return matches[0] if len(matches) == 1 else None
