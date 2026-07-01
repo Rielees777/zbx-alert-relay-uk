@@ -181,18 +181,22 @@ def main() -> int:
                   f"last={it.get('lastvalue','')!s:>14} | {it['key_']}")
             print(f"             name: {it.get('name','')}")
 
-        # 2. Категоризация по ключу: факт. трафик / уже готовый % утилизации /
-        # заявленная скорость / потери RPM. Важно не путать "bandwidth" (факт)
-        # со "speed" (ёмкость) — иначе пик трафика посчитается неверно.
+        # 2. Категоризация по ключу. Проверено на реальных данных (см. историю):
+        # "isp.bandwidth.[chan]" — item ОДИН на канал и АБСОЛЮТНО СТАТИЧЕН
+        # (min=avg=max за 20 мин) → это НОМИНАЛЬНАЯ ШИРИНА канала (ёмкость),
+        # а не факт. трафик. "isp.speed.in/out.[chan]" — колеблются во
+        # времени по обоим направлениям → это и есть ФАКТИЧЕСКИЙ ТРАФИК.
+        # Проверка: isp.speed.{in,out} / isp.bandwidth × 100 совпало с
+        # isp.calc.{in,out} (0.003% округлилось в 0 — как и есть в calc).
         def _category(key: str) -> str:
             if "rpm.loss" in key:
                 return "rpm_loss"
             if ".calc." in key:
-                return "calc_pct"      # уже готовый % утилизации (isp.calc.in/out)
+                return "calc_pct"       # уже готовый % утилизации (isp.calc.in/out)
             if ".speed." in key:
-                return "speed_bps"     # заявленная скорость канала
+                return "traffic_bps"    # фактический трафик по направлениям (in/out)
             if "bandwidth" in key:
-                return "bandwidth_bps" # фактический трафик
+                return "capacity_bps"   # номинальная ширина (ёмкость) канала
             return "other"
 
         print(f"\n[history] статистика за последние {minutes} мин (сырые значения item'а):")
@@ -217,28 +221,29 @@ def main() -> int:
         if calc_items:
             calc_peak = max(st["max"] for _, st in calc_items)
             print(f"    [готовый %] max(isp.calc.in/out) за окно: {calc_peak:.1f}%  "
-                  "(уже посчитано в Zabbix — проверить, что это (bandwidth/speed×100))")
+                  "(уже посчитано в Zabbix — сверить с расчётом вручную ниже)")
         else:
             calc_peak = None
             print("    [готовый %] item'ов isp.calc.* с этим фильтром не найдено.")
 
-        # 3b. Расчёт вручную: факт. трафик (bandwidth) / ширину канала.
-        bw_items = stats_by_cat.get("bandwidth_bps", [])
-        speed_items = stats_by_cat.get("speed_bps", [])
-        if bw_items:
-            traffic_peak = max(st["max"] for _, st in bw_items)
-            print(f"    [вручную]  пик трафика (isp.bandwidth): {traffic_peak:.0f} bps "
+        # 3b. Расчёт вручную: факт. трафик (isp.speed.in/out) / ширину канала
+        # (isp.bandwidth, либо TEST_BANDWIDTH_KBPS из Pyrus, если задан).
+        traffic_items  = stats_by_cat.get("traffic_bps", [])
+        capacity_items = stats_by_cat.get("capacity_bps", [])
+        if traffic_items:
+            traffic_peak = max(st["max"] for _, st in traffic_items)
+            print(f"    [вручную]  пик трафика (isp.speed.in/out): {traffic_peak:.0f} bps "
                   f"({_fmt_bps(traffic_peak)})")
 
-            # Ширина: приоритет TEST_BANDWIDTH_KBPS (из Pyrus), иначе isp.speed.*.
+            # Ширина: приоритет TEST_BANDWIDTH_KBPS (из Pyrus), иначе isp.bandwidth.
             bw_bps_ref = None
             ref_src    = ""
             if bw_kbps:
                 bw_bps_ref = bw_kbps * 1000
                 ref_src    = f"Pyrus, TEST_BANDWIDTH_KBPS={bw_kbps} Кбит/с"
-            elif speed_items:
-                bw_bps_ref = max(st["last"] for _, st in speed_items)
-                ref_src    = "isp.speed.* (last)"
+            elif capacity_items:
+                bw_bps_ref = max(st["last"] for _, st in capacity_items)
+                ref_src    = "isp.bandwidth (last)"
 
             if bw_bps_ref:
                 util = traffic_peak / bw_bps_ref * 100
@@ -250,13 +255,13 @@ def main() -> int:
                 print(f"    Вывод (вручную): {verdict}")
             else:
                 print("    [вручную]  нет ширины канала для сравнения — задайте TEST_BANDWIDTH_KBPS "
-                      "или проверьте isp.speed.* item'ы.")
+                      "или проверьте item isp.bandwidth.")
         else:
-            print("    [вручную]  item'ов isp.bandwidth с этим фильтром не найдено.")
+            print("    [вручную]  item'ов isp.speed.in/out с этим фильтром не найдено.")
 
-        if speed_items:
-            print("\n[speed] заявленная скорость канала (сверить с шириной из Pyrus):")
-            for it, st in speed_items:
+        if capacity_items:
+            print("\n[capacity] номинальная ширина канала (сверить с шириной из Pyrus):")
+            for it, st in capacity_items:
                 print(f"    {it['key_']}  units={it.get('units','')}  last={st['last']:.0f}  "
                       f"({_fmt_bps(st['last'])})")
 
