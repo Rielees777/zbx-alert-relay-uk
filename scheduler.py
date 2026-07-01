@@ -16,6 +16,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pipeline
 from bot import Bot
 from config import Settings
+from emulator import load_emulated_apis
 from junos import JunosApi
 from matcher import RegistryMatcher
 from models import IncidentReport
@@ -23,6 +24,15 @@ from notifier import build_notification, create_bot, send_notification
 from pyrus import PyrusClient, PyrusSiteParser
 from report import print_incident_reports
 from zabbix import ZabbixApi
+
+# Временно: путь к JSON-файлу с эмулированными алертами и данными
+# оборудования (схема — см. emulator.py). Если задан — check_rpm берёт
+# данные ИЗ ФАЙЛА вместо реального Zabbix/Junos; файл перечитывается на
+# каждом цикле, так что правки применяются без перезапуска процесса. Бот
+# и чат при этом настоящие — сообщения реально уходят получателю. Реестр
+# Pyrus — из файла (ключ "pyrus_sites"), либо, если его там нет, реальный,
+# загруженный при старте. Пусто/None — обычный боевой режим.
+EMULATOR_FIXTURE: str | None = None   # напр. "dev_alerts.json"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,6 +88,9 @@ def _build_matcher(settings: Settings) -> RegistryMatcher | None:
 
 
 def _sync_pipeline(settings: Settings, matcher: RegistryMatcher | None) -> list[IncidentReport]:
+    if EMULATOR_FIXTURE:
+        zapi, junos, fixture_matcher = load_emulated_apis(EMULATOR_FIXTURE)
+        return pipeline.run(zapi, junos, fixture_matcher if fixture_matcher is not None else matcher)
     with ZabbixApi(settings.zabbix_config()) as zapi:
         junos = JunosApi(settings)
         return pipeline.run(zapi, junos, matcher)
@@ -130,6 +143,13 @@ async def check_rpm(
 
 async def main() -> None:
     settings = Settings()
+
+    if EMULATOR_FIXTURE:
+        logger.warning(
+            "⚠ ЭМУЛЯТОР АЛЕРТОВ АКТИВЕН (EMULATOR_FIXTURE=%s): данные берутся из файла, "
+            "реальные Zabbix/Junos не используются. Бот шлёт сообщения в реальный чат.",
+            EMULATOR_FIXTURE,
+        )
 
     if not settings.bot_token:
         logger.error("BOT_TOKEN не задан в .env — уведомления отправляться не будут.")

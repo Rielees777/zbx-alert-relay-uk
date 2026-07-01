@@ -1,14 +1,22 @@
 {
-  "notes": "inet-триггер — не l2vpn, должен быть полностью проигнорирован (const.ALLOWED_CHANNEL_TYPES). pipeline.run вернёт пустой список инцидентов, junos/Pyrus не запрашиваются вовсе.",
-  "zabbix_event": {
-    "eventid": "900005",
-    "name": "RPM потери до m1-inet - 100 %",
-    "severity": "5",
-    "clock": 1719800000,
-    "r_eventid": "0",
-    "hosts": [
-      {"hostid": "11877", "host": "10.70.138.98", "name": "Алтай - Чепош"}
-    ]
-  },
-  "host_ip": "10.70.138.98"
+  "alerts": [
+    {
+      "notes": "inet-триггер — не l2vpn, должен быть полностью проигнорирован (const.ALLOWED_CHANNEL_TYPES). pipeline.run вернёт пустой список инцидентов, junos/Pyrus не запрашиваются вовсе.",
+      "zabbix_event": {
+        "eventid": "900005",
+        "name": "RPM потери до m1-inet - 100 %",
+        "severity": "5",
+        "clock": 1719800000,
+        "r_eventid": "0",
+        "hosts": [
+          {
+            "hostid": "11877",
+            "host": "10.70.138.98",
+            "name": "Алтай - Чепош"
+          }
+        ]
+      },
+      "host_ip": "10.70.138.98"
+    }
+  ]
 }

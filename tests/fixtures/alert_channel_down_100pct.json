@@ -1,33 +1,43 @@
 {
-  "notes": "100% потерь уже видно из имени триггера → пайплайн ставит CHANNEL_DOWN сразу, не обращаясь к junos/utilization (короткое замыкание в pipeline._process_problem). Поля junos ниже оставлены для полноты фикстуры, но фактически не используются.",
-  "zabbix_event": {
-    "eventid": "900003",
-    "name": "RPM потери до m1-rtk-l2vpn - 100 %",
-    "severity": "5",
-    "clock": 1719800000,
-    "r_eventid": "0",
-    "hosts": [
-      {"hostid": "11877", "host": "10.70.138.98", "name": "Алтай - Чепош"}
-    ]
-  },
-  "host_ip": "10.70.138.98",
-  "junos": {
-    "l2vpn_links": []
-  },
-  "pyrus_site": {
-    "task_id": 7,
-    "directorate": "УК-Алтай",
-    "zabbix_hostname": "uk-alt-cheposh-r",
-    "router_ip": "10.70.138.98",
-    "address": "Республика Алтай, с. Чепош",
-    "channels": [
-      {
-        "provider": "Ростелеком",
-        "service": "L2VPN",
-        "technology": "ВОЛС",
-        "contract": "14-14-16 от 13.01.2014",
-        "bandwidth": 200000
+  "alerts": [
+    {
+      "notes": "100% потерь уже видно из имени триггера → пайплайн ставит CHANNEL_DOWN сразу, не обращаясь к junos/utilization (короткое замыкание в pipeline._process_problem). Поля junos ниже оставлены для полноты фикстуры, но фактически не используются.",
+      "zabbix_event": {
+        "eventid": "900003",
+        "name": "RPM потери до m1-rtk-l2vpn - 100 %",
+        "severity": "5",
+        "clock": 1719800000,
+        "r_eventid": "0",
+        "hosts": [
+          {
+            "hostid": "11877",
+            "host": "10.70.138.98",
+            "name": "Алтай - Чепош"
+          }
+        ]
+      },
+      "host_ip": "10.70.138.98",
+      "junos": {
+        "l2vpn_links": []
       }
-    ]
-  }
+    }
+  ],
+  "pyrus_sites": [
+    {
+      "task_id": 7,
+      "directorate": "УК-Алтай",
+      "zabbix_hostname": "uk-alt-cheposh-r",
+      "router_ip": "10.70.138.98",
+      "address": "Республика Алтай, с. Чепош",
+      "channels": [
+        {
+          "provider": "Ростелеком",
+          "service": "L2VPN",
+          "technology": "ВОЛС",
+          "contract": "14-14-16 от 13.01.2014",
+          "bandwidth": 200000
+        }
+      ]
+    }
+  ]
 }
