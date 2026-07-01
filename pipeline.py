@@ -5,6 +5,7 @@ import logging
 from const import (
     ACTIVE_MINUTES,
     CHANNEL_UTIL_THRESHOLD_PCT,
+    IGNORED_CHANNEL_TYPES,
     L2VPN_LOSS_THRESHOLD_PCT,
     PING_COUNT,
     TRIGGER_PATTERNS,
@@ -35,6 +36,9 @@ def _collect_problems(zabbix_api, active_minutes: int) -> list[RpmProblem]:
     result: list[RpmProblem] = []
     for pattern in TRIGGER_PATTERNS:
         for p in zabbix_api.get_active_rpm_problems(pattern=pattern, minutes=active_minutes):
+            if p.channel_type in IGNORED_CHANNEL_TYPES:
+                logger.debug("Игнорирую %s-инцидент: %s", p.channel_type, p.trigger_name)
+                continue
             if p.eventid not in seen:
                 seen.add(p.eventid)
                 result.append(p)

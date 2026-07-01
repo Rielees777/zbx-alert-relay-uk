@@ -44,6 +44,7 @@ class RpmProblem:
     started:      int
     resolved:     int
     trigger_name: str = ""
+    channel_type: str | None = None         # тип канала из триггера: l2vpn / inet / ipsec
     trigger_loss_pct: float | None = None   # % потерь из имени триггера
 
     @property
