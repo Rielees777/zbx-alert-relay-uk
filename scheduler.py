@@ -33,6 +33,30 @@ logger = logging.getLogger(__name__)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 logging.getLogger("pyzabbix").setLevel(logging.WARNING)
 
+
+class SentRegistry:
+    """
+    Отметки об уже отправленных в чат инцидентах (ключ — eventid Zabbix).
+
+    Планировщик крутится каждые 10 секунд; без этих отметок один и тот же
+    активный инцидент слался бы в чат на каждом цикле. Отметка ставится
+    после отправки и снимается, когда инцидент пропадает из активных —
+    тогда при повторном возникновении (новый eventid) сообщение придёт снова.
+    """
+
+    def __init__(self) -> None:
+        self._sent: set[str] = set()
+
+    def was_sent(self, eventid: str) -> bool:
+        return eventid in self._sent
+
+    def mark(self, eventid: str) -> None:
+        self._sent.add(eventid)
+
+    def retain_active(self, active_ids: set[str]) -> None:
+        self._sent &= active_ids
+
+
 def _build_matcher(settings: Settings) -> RegistryMatcher | None:
     """Загружает реестр каналов связи из Pyrus и строит matcher по IP."""
     if not (settings.pyrus_login and settings.pyrus_token and settings.pyrus_form_id):
@@ -59,7 +83,12 @@ def _sync_pipeline(settings: Settings, matcher: RegistryMatcher | None) -> list[
         return pipeline.run(zapi, junos, matcher)
 
 
-async def check_rpm(settings: Settings, bot: Bot, matcher: RegistryMatcher | None) -> None:
+async def check_rpm(
+    settings: Settings,
+    bot:      Bot,
+    matcher:  RegistryMatcher | None,
+    sent:     SentRegistry,
+) -> None:
     logger.debug("▶ Запуск RPM-проверки")
     try:
         reports = await asyncio.to_thread(_sync_pipeline, settings, matcher)
@@ -69,6 +98,7 @@ async def check_rpm(settings: Settings, bot: Bot, matcher: RegistryMatcher | Non
 
     if not reports:
         logger.debug("Активных RPM-проблем не найдено.")
+        sent.retain_active(set())
         return
 
     print_incident_reports(reports)
@@ -78,12 +108,24 @@ async def check_rpm(settings: Settings, bot: Bot, matcher: RegistryMatcher | Non
         logger.warning("BOT_CHAT_ID не задан — уведомления не отправляются.")
         return
 
+    new_msgs = 0
     for report in reports:
         msg = build_notification(report)
-        if msg:
-            await send_notification(bot, chat_id, msg)
+        if not msg:
+            continue
+        eventid = report.problem.eventid
+        if sent.was_sent(eventid):
+            logger.debug("Инцидент %s уже отправлен ранее — пропуск", eventid)
+            continue
+        await send_notification(bot, chat_id, msg)
+        sent.mark(eventid)
+        new_msgs += 1
 
-    logger.info("◀ RPM-проверка завершена (%d инцидент(ов))", len(reports))
+    # Снимаем отметки с инцидентов, которых больше нет среди активных.
+    sent.retain_active({r.problem.eventid for r in reports})
+
+    logger.info("◀ RPM-проверка завершена (%d инцидент(ов), новых сообщений: %d)",
+                len(reports), new_msgs)
 
 
 async def main() -> None:
@@ -101,12 +143,15 @@ async def main() -> None:
     # Реестр Pyrus загружается один раз при старте.
     matcher = _build_matcher(settings)
 
+    # Отметки об отправленных инцидентах живут на всё время работы процесса.
+    sent = SentRegistry()
+
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         check_rpm,
         trigger="interval",
         seconds=10,
-        args=[settings, bot, matcher],
+        args=[settings, bot, matcher, sent],
         id="rpm_check",
         max_instances=1,
         coalesce=True,
@@ -115,7 +160,7 @@ async def main() -> None:
     scheduler.start()
     logger.info("Планировщик запущен. Интервал: 5 минут. Нажмите Ctrl+C для остановки.")
 
-    await check_rpm(settings, bot, matcher)  # немедленный первый запуск
+    await check_rpm(settings, bot, matcher, sent)  # немедленный первый запуск
 
     try:
         await asyncio.Event().wait()
