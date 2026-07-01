@@ -5,10 +5,10 @@ TRIGGER_PATTERNS: list[str] = [
     "RPM потери до",
 ]
 
-# Типы каналов, инциденты по которым игнорируются (не обрабатываются и не
-# шлются в чат). "inet" — трафик через интернет по белым IP; обработка пока
-# не требуется.
-IGNORED_CHANNEL_TYPES: frozenset[str] = frozenset({"inet"})
+# Обрабатываются только инциденты L2VPN-каналов. Всё остальное — inet,
+# ipsec, нераспознанные/некорректные имена триггеров (channel_type=None) —
+# игнорируется (не обрабатывается и не шлётся в чат).
+ALLOWED_CHANNEL_TYPES: frozenset[str] = frozenset({"l2vpn"})
 
 PING_COUNT: int = 100
 L2VPN_LOSS_THRESHOLD_PCT: float = 5.0
