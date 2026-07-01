@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from bot import Bot
-from const import PING_COUNT, get_cod_by_name
+from const import CHANNEL_UTIL_THRESHOLD_PCT, PING_COUNT, get_cod_by_name
 from models import IncidentDecision, IncidentReport
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,16 @@ def _operator(report: IncidentReport, cod) -> str:
     return p.cod_name or "—"
 
 
+def _utilization_str(util_pct: float | None) -> str:
+    if util_pct is None:
+        return "данные недоступны"
+    qualifier = (
+        "превышает критический порог" if util_pct > CHANNEL_UTIL_THRESHOLD_PCT
+        else "ниже критического порога"
+    )
+    return f"{util_pct:.0f}% ({qualifier})"
+
+
 def format_degradation_message(report: IncidentReport) -> str:
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
@@ -58,11 +68,7 @@ def format_degradation_message(report: IncidentReport) -> str:
     address  = p.host_name or "—"
 
     loss_pct = _avg_loss_pct(report.ping_results)
-    util_str = (
-        f"{report.utilization_pct:.0f}% (ниже критического порога)"
-        if report.utilization_pct is not None
-        else "данные недоступны"
-    )
+    util_str = _utilization_str(report.utilization_pct)
 
     return (
         f"Зафиксирована деградация на канале связи L2VPN. "
@@ -101,7 +107,7 @@ def build_notification(report: IncidentReport) -> str | None:
     d = report.decision
     if d == IncidentDecision.CHANNEL_DOWN:
         return format_channel_down_message(report)
-    if d == IncidentDecision.DEGRADED_CHANNEL:
+    if d in (IncidentDecision.DEGRADED_CHANNEL, IncidentDecision.HIGH_UTILIZATION):
         return format_degradation_message(report)
     return None
 
