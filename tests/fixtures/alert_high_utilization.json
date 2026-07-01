@@ -1,0 +1,47 @@
+{
+  "notes": "20% потерь L2VPN, канал загружен почти под ёмкость (>90%) → ожидаем HIGH_UTILIZATION. ВНИМАНИЕ: build_notification сейчас не формирует текст сообщения для HIGH_UTILIZATION — в выводе это будет видно как «сообщение не формируется».",
+  "zabbix_event": {
+    "eventid": "900002",
+    "name": "RPM потери до m1-rtk-l2vpn - 20 %",
+    "severity": "3",
+    "clock": 1719800000,
+    "r_eventid": "0",
+    "hosts": [
+      {"hostid": "11877", "host": "10.70.138.98", "name": "Алтай - Чепош"}
+    ]
+  },
+  "host_ip": "10.70.138.98",
+  "junos": {
+    "l2vpn_links": [
+      {
+        "interface": "ge-0/0/0.0",
+        "description": "m1-rtk-l2vpn transit",
+        "local_ip": "10.70.138.50",
+        "remote_ip": "10.70.138.49",
+        "loss": 20
+      }
+    ],
+    "ipsec_links": []
+  },
+  "utilization": {
+    "bandwidth_bps": 200000000,
+    "speed_in_bps": [190000000, 195000000],
+    "speed_out_bps": [50000000, 60000000]
+  },
+  "pyrus_site": {
+    "task_id": 7,
+    "directorate": "УК-Алтай",
+    "zabbix_hostname": "uk-alt-cheposh-r",
+    "router_ip": "10.70.138.98",
+    "address": "Республика Алтай, с. Чепош",
+    "channels": [
+      {
+        "provider": "Ростелеком",
+        "service": "L2VPN",
+        "technology": "ВОЛС",
+        "contract": "14-14-16 от 13.01.2014",
+        "bandwidth": 200000
+      }
+    ]
+  }
+}
