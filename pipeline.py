@@ -52,7 +52,9 @@ def _process_problem(zabbix_api, junos_api, problem: RpmProblem) -> IncidentRepo
 
     l2vpn_loss_pct = _loss_pct(report.ping_results, PING_COUNT)
 
-    if not report.ping_results and l2vpn_loss_pct >= 100.0:
+    # Канал полностью недоступен, если L2VPN-линки не найдены на устройстве
+    # (интерфейс лёг) ИЛИ линки найдены, но потери 100%.
+    if not report.ping_results or l2vpn_loss_pct >= 100.0:
         logger.warning(
             "Канал полностью недоступен: host=%s → CHANNEL_DOWN",
             problem.host_name,
