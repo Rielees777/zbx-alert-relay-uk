@@ -69,15 +69,19 @@ def _ensure_jnpr() -> None:
     class RpcError(Exception):
         ...
 
+    class RpcTimeoutError(RpcError):
+        ...
+
     class ConnectError(Exception):
         ...
 
     class Device:  # не используется — _connect мы подменяем
         def __init__(self, *a, **k): ...
 
-    exc.RpcError      = RpcError
-    exc.ConnectError  = ConnectError
-    junos.Device      = Device
+    exc.RpcError         = RpcError
+    exc.RpcTimeoutError  = RpcTimeoutError
+    exc.ConnectError     = ConnectError
+    junos.Device         = Device
     junos.exception = exc
     jnpr.junos     = junos
     sys.modules.update({

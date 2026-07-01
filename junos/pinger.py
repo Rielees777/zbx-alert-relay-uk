@@ -22,7 +22,7 @@ class JunosPinger:
         )
 
     def ping_loss(self, dest_ip: str, source_ip: str, count: int = 100) -> int | None:
-        from jnpr.junos.exception import RpcError
+        from jnpr.junos.exception import RpcError, RpcTimeoutError
         try:
             resp = self.dev.rpc.ping(
                 host=dest_ip,
@@ -30,6 +30,11 @@ class JunosPinger:
                 count=str(count),
                 rapid=True,
             )
+        except RpcTimeoutError:
+            # Пинг не уложился в таймаут: адресат не отвечает — это полный обрыв
+            # канала (100% потерь), а не ошибка. Иначе такой случай уходил бы в
+            # ERROR и сообщение не отправлялось.
+            return count
         except RpcError as exc:
             raise RuntimeError(f"Ошибка ping {dest_ip} (source {source_ip}): {exc}") from exc
         return self._parse_loss(resp)
