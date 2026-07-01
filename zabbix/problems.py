@@ -64,8 +64,73 @@ class ZabbixProblems(ZabbixClient):
                 trigger_name=trigger_name,
                 channel_type=trigger.channel_type,
                 trigger_loss_pct=trigger.loss_pct,
+                hostid=h["hostid"],
+                channel_spec=trigger.channel_spec,
             ))
         return result
+
+    def get_channel_utilization_pct(
+        self,
+        hostid:       str,
+        channel_spec: str | None,
+        minutes:      int,
+    ) -> float | None:
+        """
+        Пик утилизации канала за последние `minutes` минут:
+            max(isp.speed.in, isp.speed.out за окно) / isp.bandwidth × 100
+
+        isp.bandwidth.[channel_spec] — статичная номинальная ширина канала;
+        isp.speed.in/out.[channel_spec] — фактический трафик по направлениям
+        (несмотря на имя "speed", это не заявленная скорость, а измеренная).
+        Проверено на реальных данных: результат совпадает с готовым
+        isp.calc.in/out того же канала.
+
+        Возвращает None, если channel_spec не определён или нужные item'ы /
+        данные не найдены — пайплайн трактует это как «утилизация неизвестна».
+        """
+        if not channel_spec:
+            return None
+        self._ensure_connected()
+
+        items = self._zapi.item.get(
+            hostids=[hostid],
+            output=["itemid", "key_", "value_type", "lastvalue"],
+            search={"key_": f"[{channel_spec}]"},
+        )
+        if not items:
+            return None
+
+        traffic_items  = [it for it in items if ".speed.in." in it["key_"] or ".speed.out." in it["key_"]]
+        capacity_items = [it for it in items if "bandwidth" in it["key_"]]
+        if not traffic_items or not capacity_items:
+            return None
+
+        capacity_bps = self._safe_float(capacity_items[0].get("lastvalue"))
+        if not capacity_bps or capacity_bps <= 0:
+            return None
+
+        time_from    = int(time.time()) - minutes * 60
+        traffic_peak = 0.0
+        for it in traffic_items:
+            hist = self._zapi.history.get(
+                itemids=[it["itemid"]],
+                time_from=time_from,
+                history=int(it["value_type"]),
+                output="extend",
+            )
+            values = [self._safe_float(h.get("value")) for h in hist]
+            values = [v for v in values if v is not None]
+            if values:
+                traffic_peak = max(traffic_peak, max(values))
+
+        return traffic_peak / capacity_bps * 100
+
+    @staticmethod
+    def _safe_float(value) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _define_cod(node: str) -> COD | None:

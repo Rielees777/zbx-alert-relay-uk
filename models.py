@@ -46,6 +46,8 @@ class RpmProblem:
     trigger_name: str = ""
     channel_type: str | None = None         # тип канала из триггера: l2vpn / inet / ipsec
     trigger_loss_pct: float | None = None   # % потерь из имени триггера
+    hostid:       str = ""                  # hostid Zabbix (для запроса item'ов утилизации)
+    channel_spec: str | None = None         # "m1-rtk-l2vpn" — как в ключах item'ов isp.*
 
     @property
     def is_active(self) -> bool:

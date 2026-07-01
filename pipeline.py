@@ -9,6 +9,7 @@ from const import (
     L2VPN_LOSS_THRESHOLD_PCT,
     PING_COUNT,
     TRIGGER_PATTERNS,
+    UTIL_LOOKBACK_MINUTES,
 )
 from models import IncidentDecision, IncidentReport, RpmProblem
 
@@ -138,9 +139,9 @@ def _attach_pyrus(report: IncidentReport, matcher) -> None:
         logger.warning("Pyrus: нет совпадения для хоста %s", report.problem.host_name)
 
 def _check_channel_utilization(zabbix_api, problem: RpmProblem) -> float | None:
-    # TODO: реализовать поиск интерфейса через Zabbix API.
-    # Пока всегда None → pipeline выбирает DEGRADED_CHANNEL.
-    return None
+    return zabbix_api.get_channel_utilization_pct(
+        problem.hostid, problem.channel_spec, UTIL_LOOKBACK_MINUTES,
+    )
 
 
 def _loss_pct(ping_results, total_count: int) -> float:

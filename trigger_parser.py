@@ -28,9 +28,11 @@ class TriggerInfo:
         self.provider:     str | None   = None   # нормализованный, напр. "ТТК"
         self.channel_type: str | None   = None   # l2vpn / inet / ipsec
         self.loss_pct:     float | None = None   # % потерь из имени триггера
+        self.channel_spec: str | None   = None   # "m1-rtk-l2vpn" — как в ключах item'ов Zabbix
 
         m = _SPEC_RE.search(raw)
         if m:
+            self.channel_spec = m.group("spec")
             parts = [p for p in m.group("spec").split("-") if p]
             if parts:
                 self.node = parts[0]

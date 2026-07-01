@@ -45,7 +45,8 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 TRIGGER_NAME = "RPM потери до m1-ttk-l2vpn - 20 %"
-LOSS_PCT     = 20   # синтетические потери на L2VPN-линке
+LOSS_PCT     = 20     # синтетические потери на L2VPN-линке
+UTIL_PCT     = 35.0   # синтетическая утилизация канала (< 90% → DEGRADED_CHANNEL)
 
 
 # ───────────────────────── Заглушка jnpr (для offline-запуска) ──────────────
@@ -151,6 +152,10 @@ class _FakeZabbixApi:
 
     def get_active_rpm_problems(self, pattern: str, minutes: int = 5):
         return list(self._problems)
+
+    def get_channel_utilization_pct(self, hostid: str, channel_spec: str | None, minutes: int):
+        """Синтетическая утилизация — реальный расчёт см. zabbix/problems.py."""
+        return UTIL_PCT
 
 
 def _synthetic_problem(trigger_name: str, router_ip: str, hostname: str):
