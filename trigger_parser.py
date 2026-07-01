@@ -19,10 +19,11 @@ class TriggerInfo:
 
     def __init__(self, raw: str) -> None:
         self.raw          = raw
-        self.node:         str | None = None
-        self.provider_raw: str | None = None
-        self.provider:     str | None = None   # нормализованный, напр. "ТТК"
-        self.channel_type: str | None = None
+        self.node:         str | None   = None
+        self.provider_raw: str | None   = None
+        self.provider:     str | None   = None   # нормализованный, напр. "ТТК"
+        self.channel_type: str | None   = None
+        self.loss_pct:     float | None = None   # % потерь из имени триггера
 
         m = _TRIGGER_RE.search(raw)
         if m:
@@ -30,6 +31,10 @@ class TriggerInfo:
             self.provider_raw = m.group("provider")
             self.provider     = normalize_provider(self.provider_raw)
             self.channel_type = m.group("channel_type")
+
+        m_loss = re.search(r'(\d+(?:[.,]\d+)?)\s*%', raw)
+        if m_loss:
+            self.loss_pct = float(m_loss.group(1).replace(",", "."))
 
     def __repr__(self) -> str:
         return (

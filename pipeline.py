@@ -44,6 +44,15 @@ def _collect_problems(zabbix_api, active_minutes: int) -> list[RpmProblem]:
 def _process_problem(zabbix_api, junos_api, problem: RpmProblem) -> IncidentReport:
     logger.info("Проверяю: host=%s  ip=%s  cod=%s", problem.host_name, problem.ip, problem.cod_name)
 
+    # Триггер уже сообщает 100% потерь — канал полностью недоступен,
+    # пинговать устройство не нужно.
+    if problem.trigger_loss_pct is not None and problem.trigger_loss_pct >= 100.0:
+        logger.warning(
+            "Триггер сообщает 100%% потерь: host=%s → CHANNEL_DOWN (без пинга)",
+            problem.host_name,
+        )
+        return IncidentReport(problem=problem, decision=IncidentDecision.CHANNEL_DOWN)
+
     report = junos_api.analyze_problem(problem, count=PING_COUNT)
 
     if report.error:

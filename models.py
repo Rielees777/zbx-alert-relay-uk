@@ -44,6 +44,7 @@ class RpmProblem:
     started:      int
     resolved:     int
     trigger_name: str = ""
+    trigger_loss_pct: float | None = None   # % потерь из имени триггера
 
     @property
     def is_active(self) -> bool:

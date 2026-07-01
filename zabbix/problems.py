@@ -62,6 +62,7 @@ class ZabbixProblems(ZabbixClient):
                 started=int(event.get("clock", 0)),
                 resolved=resolved_clock,
                 trigger_name=trigger_name,
+                trigger_loss_pct=trigger.loss_pct,
             ))
         return result
 
