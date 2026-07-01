@@ -47,7 +47,11 @@ def _process_problem(zabbix_api, junos_api, problem: RpmProblem) -> IncidentRepo
     report = junos_api.analyze_problem(problem, count=PING_COUNT)
 
     if report.error:
-        report.decision = IncidentDecision.ERROR
+        # Недоступность железки по управлению = полный обрыв канала.
+        report.decision = (
+            IncidentDecision.CHANNEL_DOWN if report.unreachable
+            else IncidentDecision.ERROR
+        )
         return report
 
     l2vpn_loss_pct = _loss_pct(report.ping_results, PING_COUNT)

@@ -25,16 +25,24 @@ class JunosApi:
                 problem=problem,
                 error=f"Не удалось определить COD из триггера (host={problem.host_name})",
             )
+        from jnpr.junos.exception import ConnectError
         try:
             with self._connect(problem.ip) as dev:
                 parser  = JunosInterfaceParser.from_device(dev)
                 links   = parser.l2vpn_links(cod_name=problem.cod_name, want=JUNOS_WANT_L2VPN)
                 pinger  = JunosPinger(dev)
                 results = [pinger.ping_link(link, count=count) for link in links]
+        except ConnectError as exc:
+            # Железка недоступна по управлению — трактуем как полный обрыв канала.
+            return IncidentReport(
+                problem=problem,
+                error=f"Устройство {problem.ip} недоступно по управлению: {exc}",
+                unreachable=True,
+            )
         except Exception as exc:
             return IncidentReport(
                 problem=problem,
-                error=f"Ошибка подключения к {problem.ip}: {exc}",
+                error=f"Ошибка обработки {problem.ip}: {exc}",
             )
         return IncidentReport(problem=problem, ping_results=results)
 
