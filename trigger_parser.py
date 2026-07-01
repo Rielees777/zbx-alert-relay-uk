@@ -5,34 +5,46 @@ import re
 from models import ChannelInfo, PyrusSite
 from providers import normalize_provider
 
-# "RPM потери до m1-ttk-l2vpn"
-#                   ^^  ^^^  ^^^^^
-#                 узел  провайдер  тип
-_TRIGGER_RE = re.compile(
-    r'до\s+(?P<node>[^-\s]+)-(?P<provider>[^-\s]+)(?:-(?P<channel_type>[^-\s]+))?',
-    re.IGNORECASE,
-)
+# Типы канала в имени триггера (а не провайдеры). "inet" — трафик через
+# интернет по белым IP (без выделенного L2VPN и без конкретного оператора).
+_CHANNEL_TYPES = frozenset({"l2vpn", "ipsec", "inet"})
+
+# Тип канала из триггера → услуга (колонка «Услуга» в Pyrus).
+_TYPE_TO_SERVICE = {"inet": "интернет"}
+
+# "RPM потери до m1-ttk-l2vpn - 100 %"  → узел m1, провайдер ttk, тип l2vpn
+# "RPM потери до m1-inet - 100 %"       → узел m1, без провайдера, тип inet
+_SPEC_RE = re.compile(r'до\s+(?P<spec>\S+)', re.IGNORECASE)
+_LOSS_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*%')
 
 
 class TriggerInfo:
-    """Распарсенный триггер Zabbix: узел, провайдер, тип канала."""
+    """Распарсенный триггер Zabbix: узел, (опц.) провайдер, тип канала."""
 
     def __init__(self, raw: str) -> None:
         self.raw          = raw
         self.node:         str | None   = None
         self.provider_raw: str | None   = None
         self.provider:     str | None   = None   # нормализованный, напр. "ТТК"
-        self.channel_type: str | None   = None
+        self.channel_type: str | None   = None   # l2vpn / inet / ipsec
         self.loss_pct:     float | None = None   # % потерь из имени триггера
 
-        m = _TRIGGER_RE.search(raw)
+        m = _SPEC_RE.search(raw)
         if m:
-            self.node         = m.group("node")
-            self.provider_raw = m.group("provider")
-            self.provider     = normalize_provider(self.provider_raw)
-            self.channel_type = m.group("channel_type")
+            parts = [p for p in m.group("spec").split("-") if p]
+            if parts:
+                self.node = parts[0]
+                rest = parts[1:]
+                # Последний сегмент — тип канала, если это известный тип.
+                if rest and rest[-1].lower() in _CHANNEL_TYPES:
+                    self.channel_type = rest[-1].lower()
+                    rest = rest[:-1]
+                # Что осталось между узлом и типом — провайдер (для inet его нет).
+                if rest:
+                    self.provider_raw = rest[0]
+                    self.provider     = normalize_provider(rest[0])
 
-        m_loss = re.search(r'(\d+(?:[.,]\d+)?)\s*%', raw)
+        m_loss = _LOSS_RE.search(raw)
         if m_loss:
             self.loss_pct = float(m_loss.group(1).replace(",", "."))
 
@@ -51,35 +63,35 @@ def find_channel_by_trigger(
     """
     По имени триггера находит нужный канал в задаче Pyrus.
 
-    Договор для сообщения должен соответствовать и провайдеру, и типу
-    услуги (l2vpn). Алгоритм:
-      1. Нормализуем провайдер из имени триггера ("ttk" → "ТТК").
-      2. Оставляем каналы того же провайдера.
-      3. Если в триггере указан тип услуги (l2vpn/ipsec) — берём только
-         канал с этой услугой; иначе договор не подставляем.
-      4. Если тип услуги в триггере не указан — подставляем договор только
-         при единственном канале провайдера (иначе выбор неоднозначен).
+    Договор должен соответствовать провайдеру (если он есть в триггере) и
+    типу услуги. Алгоритм:
+      1. Если в триггере есть провайдер ("ttk" → "ТТК") — оставляем каналы
+         только этого провайдера. Для inet-триггеров провайдера нет.
+      2. Тип канала из триггера сопоставляем с колонкой «Услуга»:
+         l2vpn → «L2VPN», inet → «Интернет». Берём канал с этой услугой.
+      3. Если тип не указан — подставляем договор только при единственном
+         подходящем канале (иначе выбор неоднозначен).
     """
     trigger = TriggerInfo(trigger_name)
-    if not trigger.provider or not site.channels:
+    if not site.channels:
         return None
 
-    matches = [
-        ch for ch in site.channels
-        if normalize_provider(ch.provider) == trigger.provider
-    ]
-    if not matches:
-        return None
+    matches = list(site.channels)
 
-    # Тип услуги из триггера (l2vpn) — обязательное условие: подставляем
-    # договор только того канала, чья услуга (колонка «Услуга», cell 49)
-    # совпадает. Чужой договор (напр. интернет-канал того же провайдера)
-    # не используем.
-    if trigger.channel_type:
-        typed = [
+    # 1. Фильтр по провайдеру (у inet-триггера провайдера нет — пропускаем).
+    if trigger.provider:
+        matches = [
             ch for ch in matches
-            if ch.service and trigger.channel_type.lower() in ch.service.lower()
+            if normalize_provider(ch.provider) == trigger.provider
         ]
+        if not matches:
+            return None
+
+    # 2. Фильтр по услуге, соответствующей типу канала из триггера.
+    if trigger.channel_type:
+        want = _TYPE_TO_SERVICE.get(trigger.channel_type, trigger.channel_type)
+        typed = [ch for ch in matches if ch.service and want in ch.service.lower()]
         return typed[0] if typed else None
 
+    # 3. Тип не распознан — только если канал однозначен.
     return matches[0] if len(matches) == 1 else None

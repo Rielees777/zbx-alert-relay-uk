@@ -35,11 +35,25 @@ def _contract(report: IncidentReport, cod) -> str:
     return "—"
 
 
+def _operator(report: IncidentReport, cod) -> str:
+    """Оператор связи: сначала провайдер сматченного канала Pyrus (реальный
+    ISP, в т.ч. для интернет-каналов), затем провайдер из триггера, затем COD."""
+    channel = report.pyrus_channel
+    if channel and channel.provider:
+        return channel.provider
+    p = report.problem
+    if p.provider:
+        return p.provider
+    if cod and cod.operator:
+        return cod.operator
+    return p.cod_name or "—"
+
+
 def format_degradation_message(report: IncidentReport) -> str:
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
-    operator = p.provider or (cod.operator if cod and cod.operator else p.cod_name) or "—"
+    operator = _operator(report, cod)
     contract = _contract(report, cod)
     address  = p.host_name or "—"
 
@@ -67,7 +81,7 @@ def format_channel_down_message(report: IncidentReport) -> str:
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
-    operator = p.provider or (cod.operator if cod and cod.operator else p.cod_name) or "—"
+    operator = _operator(report, cod)
     contract = _contract(report, cod)
     address  = p.host_name or "—"
 
