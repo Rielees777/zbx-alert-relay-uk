@@ -20,6 +20,20 @@ MIN_ALERT_AGE_SEC: int = 10
 JUNOS_WANT_L2VPN: str = "l2vpn"
 JUNOS_WANT_IPSEC: str = "ipsec"
 
+# Email операторов связи для отправки обращений напрямую провайдеру.
+# Ключ — канонический провайдер (как в providers.PROVIDER_ALIASES и в
+# ChannelInfo.provider из Pyrus). Если провайдера здесь нет — письмо уходит
+# на запасной адрес Settings.mail_to_default (если он задан).
+PROVIDER_EMAILS: dict[str, str] = {
+    # "Ростелеком": "noc@rt.ru",
+    # "ТТК":        "support@ttk.ru",
+    # "МТС":        "b2b@mts.ru",
+}
+
+
+def get_provider_email(provider: str | None) -> str | None:
+    return PROVIDER_EMAILS.get(provider) if provider else None
+
 
 @dataclass(frozen=True)
 class COD:

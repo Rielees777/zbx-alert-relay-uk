@@ -18,6 +18,7 @@ from bot import Bot
 from config import Settings
 from emulator import load_emulated_apis
 from junos import JunosApi
+from mailer import send_provider_notification
 from matcher import RegistryMatcher
 from models import IncidentReport
 from notifier import build_notification, create_bot, send_notification
@@ -131,6 +132,8 @@ async def check_rpm(
             logger.debug("Инцидент %s уже отправлен ранее — пропуск", eventid)
             continue
         await send_notification(bot, chat_id, msg)
+        # Письмо оператору напрямую (инертно, пока не заданы MAIL_* в config).
+        await asyncio.to_thread(send_provider_notification, settings, report)
         sent.mark(eventid)
         new_msgs += 1
 
