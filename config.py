@@ -37,19 +37,16 @@ class Settings(BaseSettings):
     bot_proxy:   str = Field("", validation_alias=AliasChoices("BOT_PROXY",   "bot_proxy"))
     bot_chat_id: str = Field("", validation_alias=AliasChoices("BOT_CHAT_ID", "bot_chat_id"))
 
-    # Почта оператору по SMTP (MAIL_*)
-    mail_host:       str  = Field("",   validation_alias=AliasChoices("MAIL_HOST",       "mail_host"))
-    mail_port:       int  = Field(587,  validation_alias=AliasChoices("MAIL_PORT",       "mail_port"))
-    mail_user:       str  = Field("",   validation_alias=AliasChoices("MAIL_USER",       "mail_user"))
-    mail_password:   str  = Field("",   validation_alias=AliasChoices("MAIL_PASSWORD",   "mail_password"))
-    mail_from:       str  = Field("",   validation_alias=AliasChoices("MAIL_FROM",       "mail_from"))
-    mail_use_tls:    bool = Field(True, validation_alias=AliasChoices("MAIL_USE_TLS",    "mail_use_tls"))
+    # Почта оператору через mail-service по HTTP (MAIL_*)
+    mail_service_url: str = Field("",           validation_alias=AliasChoices("MAIL_SERVICE_URL", "mail_service_url"))
+    mailbox:          str = Field("isptt_init", validation_alias=AliasChoices("MAILBOX",          "mailbox"))
+    mail_verify_ssl:  bool = Field(True,        validation_alias=AliasChoices("MAIL_VERIFY_SSL",  "mail_verify_ssl"))
     # Запасной адрес получателя, если провайдер не найден в PROVIDER_EMAILS.
-    mail_to_default: str  = Field("",   validation_alias=AliasChoices("MAIL_TO_DEFAULT", "mail_to_default"))
+    mail_to_default:  str = Field("",           validation_alias=AliasChoices("MAIL_TO_DEFAULT",  "mail_to_default"))
 
     @property
     def mail_enabled(self) -> bool:
-        return bool(self.mail_host and self.mail_from)
+        return bool(self.mail_service_url)
 
     def zabbix_config(self) -> ZabbixConfig:
         return ZabbixConfig(
