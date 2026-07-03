@@ -6,6 +6,7 @@ from const import JUNOS_WANT_IPSEC, JUNOS_WANT_L2VPN
 from models import IncidentReport, PingResult, RpmProblem
 from junos.parser import JunosInterfaceParser
 from junos.pinger import JunosPinger
+from junos.switcher import BgpPolicySwitcher, SwitchResult
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,78 @@ class JunosApi:
                 problem.ip, problem.host_name, exc,
             )
             return []
+
+    def switch_channel(
+        self,
+        problem:         RpmProblem,
+        group:           str = "ebgp",
+        dry_run:         bool = False,
+        confirm_minutes: int | None = 5,
+    ) -> SwitchResult:
+        """
+        Переключает канал основной↔резервный: меняет местами пары BGP-политик
+        import/export между двумя соседями группы (P1 ↔ P2). Операция
+        симметрична — повторный вызов возвращает исходное состояние.
+
+        Предназначен для вызова при деградации L2VPN или потерях в IPSEC
+        (условия задаёт вызывающая сторона — pipeline).
+
+        dry_run=True — построить план, загрузить кандидат-конфиг, снять diff
+        и откатить БЕЗ commit (безопасная проверка на живом устройстве).
+
+        confirm_minutes — использовать `commit confirmed N`: если процесс
+        после переключения потеряет доступ к железке и не подтвердит commit,
+        устройство само откатится через N минут. None — обычный commit.
+        """
+        result = SwitchResult(success=False, dry_run=dry_run, group=group)
+        if not problem.ip:
+            result.error = f"Нет IP для хоста '{problem.host_name}'"
+            return result
+
+        try:
+            from jnpr.junos.utils.config import Config
+            from lxml import etree
+
+            with self._connect(problem.ip) as dev:
+                bgp_filter = etree.XML("<configuration><protocols><bgp/></protocols></configuration>")
+                cfg_xml    = dev.rpc.get_config(filter_xml=bgp_filter)
+
+                plan = BgpPolicySwitcher(cfg_xml).plan_swap(
+                    group=group, channel_spec=problem.channel_spec,
+                )
+                result.neighbors = (plan.a.address, plan.b.address)
+                result.commands  = plan.commands()
+
+                with Config(dev, mode="exclusive") as cu:
+                    cu.load("\n".join(result.commands), format="set")
+                    result.diff = cu.diff()
+                    if dry_run:
+                        cu.rollback()
+                        result.success = True
+                        logger.info(
+                            "switch_channel DRY-RUN %s (group=%s): %s ↔ %s\n%s",
+                            problem.ip, group, plan.a.address, plan.b.address, result.diff,
+                        )
+                        return result
+                    if confirm_minutes:
+                        cu.commit(
+                            comment=f"auto channel switch: {problem.trigger_name}",
+                            confirm=confirm_minutes,
+                        )
+                        # Подтверждаем сразу: доступ к железке не потерян.
+                        cu.commit(comment="auto channel switch: confirm")
+                    else:
+                        cu.commit(comment=f"auto channel switch: {problem.trigger_name}")
+
+            result.success = True
+            logger.warning(
+                "Канал переключён (%s ↔ %s) на %s, group=%s, trigger=%s",
+                plan.a.address, plan.b.address, problem.ip, group, problem.trigger_name,
+            )
+        except Exception as exc:
+            result.error = str(exc)
+            logger.error("Ошибка переключения канала на %s: %s", problem.ip, exc)
+        return result
 
     def _connect(self, host: str):
         from jnpr.junos import Device
