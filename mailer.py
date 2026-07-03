@@ -109,12 +109,28 @@ class MailClient:
             return ""
 
 
+# Решения, по которым уместно обращение к оператору. HIGH_UTILIZATION сюда
+# не входит: канал перегружен собственным трафиком, вины оператора нет.
+_MAILABLE_DECISIONS = frozenset({
+    IncidentDecision.CHANNEL_DOWN,
+    IncidentDecision.DEGRADED_CHANNEL,
+})
+
+
 def send_provider_notification(settings, report: IncidentReport) -> bool:
     """Формирует и шлёт письмо оператору через mail-service. Возвращает True
     при успешной отправке. Блокирующая (HTTP) — из asyncio вызывать через
     to_thread."""
     if not settings.mail_enabled:
         logger.debug("Почта не сконфигурирована (MAIL_SERVICE_URL) — письмо не отправляется.")
+        return False
+
+    if report.decision not in _MAILABLE_DECISIONS:
+        logger.debug(
+            "Письмо оператору не требуется для decision=%s (host=%s)",
+            report.decision.value if report.decision else None,
+            report.problem.host_name,
+        )
         return False
 
     to_addr = resolve_recipient(report, settings)
