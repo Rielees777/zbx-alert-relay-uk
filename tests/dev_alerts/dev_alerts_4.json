@@ -1,0 +1,50 @@
+{
+  "_readme": "СЛУЧАЙ 4: CHANNEL_DOWN через недоступность железки — триггер НЕ 100%, но устройство не отвечает по SSH (ConnectError). Ветка unreachable -> CHANNEL_DOWN, бот шлёт «канал полностью недоступен».",
+
+  "pyrus_sites": [
+    {
+      "task_id": 7,
+      "directorate": "УК-Алтай",
+      "zabbix_hostname": "uk-alt-cheposh-r",
+      "router_ip": "10.70.138.98",
+      "address": "Республика Алтай, с. Чепош",
+      "channels": [
+        {
+          "provider": "Ростелеком",
+          "service": "L2VPN",
+          "technology": "ВОЛС",
+          "contract": "14-14-16 от 13.01.2014",
+          "bandwidth": 200000
+        },
+        {
+          "provider": "Ростелеком",
+          "service": "Интернет",
+          "technology": "Ethernet",
+          "contract": "14-14-16-INET",
+          "bandwidth": 50000
+        }
+      ]
+    }
+  ],
+
+  "alerts": [
+    {
+      "notes": "SSH к устройству недоступен -> unreachable=true -> CHANNEL_DOWN (а не молчаливый ERROR)",
+      "zabbix_event": {
+        "eventid": "900004",
+        "name": "RPM потери до m1-rtk-l2vpn - 20 %",
+        "severity": "4",
+        "clock": 1719800000,
+        "r_eventid": "0",
+        "hosts": [
+          {"hostid": "11877", "host": "10.70.138.98", "name": "Алтай - Чепош"}
+        ]
+      },
+      "host_ip": "10.70.138.98",
+      "junos": {
+        "unreachable": true,
+        "error": "ConnectTimeoutError: 10.70.138.98"
+      }
+    }
+  ]
+}

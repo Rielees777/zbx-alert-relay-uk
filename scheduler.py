@@ -33,7 +33,10 @@ from zabbix import ZabbixApi
 # и чат при этом настоящие — сообщения реально уходят получателю. Реестр
 # Pyrus — из файла (ключ "pyrus_sites"), либо, если его там нет, реальный,
 # загруженный при старте. Пусто/None — обычный боевой режим.
-EMULATOR_FIXTURE: str | None = None   # напр. "dev_alerts.json"
+# Готовые случаи: tests/dev_alerts/dev_alerts_1.json … dev_alerts_7.json
+# (1 деградация, 2 перегрузка, 3 обрыв 100%, 4 SSH недоступен,
+#  5 потери IPSEC, 6 ложное срабатывание, 7 игнорируемый inet).
+EMULATOR_FIXTURE: str | None = "tests/dev_alerts/dev_alerts_1.json"
 
 logging.basicConfig(
     level=logging.INFO,

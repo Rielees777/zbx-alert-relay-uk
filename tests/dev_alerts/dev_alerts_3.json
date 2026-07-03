@@ -1,0 +1,49 @@
+{
+  "_readme": "СЛУЧАЙ 3: CHANNEL_DOWN по триггеру — 100% потерь уже в имени триггера, пайплайн ставит CHANNEL_DOWN сразу, junos и утилизация не запрашиваются (короткое замыкание). Бот шлёт «канал полностью недоступен».",
+
+  "pyrus_sites": [
+    {
+      "task_id": 7,
+      "directorate": "УК-Алтай",
+      "zabbix_hostname": "uk-alt-cheposh-r",
+      "router_ip": "10.70.138.98",
+      "address": "Республика Алтай, с. Чепош",
+      "channels": [
+        {
+          "provider": "Ростелеком",
+          "service": "L2VPN",
+          "technology": "ВОЛС",
+          "contract": "14-14-16 от 13.01.2014",
+          "bandwidth": 200000
+        },
+        {
+          "provider": "Ростелеком",
+          "service": "Интернет",
+          "technology": "Ethernet",
+          "contract": "14-14-16-INET",
+          "bandwidth": 50000
+        }
+      ]
+    }
+  ],
+
+  "alerts": [
+    {
+      "notes": "100% в триггере -> CHANNEL_DOWN без пинга (junos ниже фактически не используется)",
+      "zabbix_event": {
+        "eventid": "900003",
+        "name": "RPM потери до m1-rtk-l2vpn - 100 %",
+        "severity": "5",
+        "clock": 1719800000,
+        "r_eventid": "0",
+        "hosts": [
+          {"hostid": "11877", "host": "10.70.138.98", "name": "Алтай - Чепош"}
+        ]
+      },
+      "host_ip": "10.70.138.98",
+      "junos": {
+        "l2vpn_links": []
+      }
+    }
+  ]
+}

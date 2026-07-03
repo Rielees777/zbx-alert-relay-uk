@@ -1,0 +1,46 @@
+{
+  "_readme": "СЛУЧАЙ 7: игнорируемый триггер — inet-канал (не l2vpn). Отбрасывается фильтром ALLOWED_CHANNEL_TYPES ещё до обработки: ни junos, ни Pyrus, ни сообщений. В логе будет «инцидентов не найдено».",
+
+  "pyrus_sites": [
+    {
+      "task_id": 7,
+      "directorate": "УК-Алтай",
+      "zabbix_hostname": "uk-alt-cheposh-r",
+      "router_ip": "10.70.138.98",
+      "address": "Республика Алтай, с. Чепош",
+      "channels": [
+        {
+          "provider": "Ростелеком",
+          "service": "L2VPN",
+          "technology": "ВОЛС",
+          "contract": "14-14-16 от 13.01.2014",
+          "bandwidth": 200000
+        },
+        {
+          "provider": "Ростелеком",
+          "service": "Интернет",
+          "technology": "Ethernet",
+          "contract": "14-14-16-INET",
+          "bandwidth": 50000
+        }
+      ]
+    }
+  ],
+
+  "alerts": [
+    {
+      "notes": "inet-триггер -> полностью игнорируется (пустой список инцидентов)",
+      "zabbix_event": {
+        "eventid": "900007",
+        "name": "RPM потери до m1-inet - 100 %",
+        "severity": "5",
+        "clock": 1719800000,
+        "r_eventid": "0",
+        "hosts": [
+          {"hostid": "11877", "host": "10.70.138.98", "name": "Алтай - Чепош"}
+        ]
+      },
+      "host_ip": "10.70.138.98"
+    }
+  ]
+}

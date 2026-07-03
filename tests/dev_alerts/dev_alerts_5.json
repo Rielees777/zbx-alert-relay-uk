@@ -1,0 +1,66 @@
+{
+  "_readme": "СЛУЧАЙ 5: IPSEC_LOSS — L2VPN-транспорт чистый (потери 2% <= порога 5%), но в IPSEC-тоннеле потери 15%. ВНИМАНИЕ: для IPSEC_LOSS бот сообщение НЕ шлёт (build_notification не формирует текст) — инцидент виден только в логе/отчёте.",
+
+  "pyrus_sites": [
+    {
+      "task_id": 7,
+      "directorate": "УК-Алтай",
+      "zabbix_hostname": "uk-alt-cheposh-r",
+      "router_ip": "10.70.138.98",
+      "address": "Республика Алтай, с. Чепош",
+      "channels": [
+        {
+          "provider": "Ростелеком",
+          "service": "L2VPN",
+          "technology": "ВОЛС",
+          "contract": "14-14-16 от 13.01.2014",
+          "bandwidth": 200000
+        },
+        {
+          "provider": "Ростелеком",
+          "service": "Интернет",
+          "technology": "Ethernet",
+          "contract": "14-14-16-INET",
+          "bandwidth": 50000
+        }
+      ]
+    }
+  ],
+
+  "alerts": [
+    {
+      "notes": "L2VPN чистый (loss=2), IPSEC с потерями (loss=15) -> IPSEC_LOSS",
+      "zabbix_event": {
+        "eventid": "900005",
+        "name": "RPM потери до m1-rtk-l2vpn - 8 %",
+        "severity": "3",
+        "clock": 1719800000,
+        "r_eventid": "0",
+        "hosts": [
+          {"hostid": "11877", "host": "10.70.138.98", "name": "Алтай - Чепош"}
+        ]
+      },
+      "host_ip": "10.70.138.98",
+      "junos": {
+        "l2vpn_links": [
+          {
+            "interface": "ge-0/0/0.0",
+            "description": "m1-rtk-l2vpn",
+            "local_ip": "10.70.138.50",
+            "remote_ip": "10.70.138.49",
+            "loss": 2
+          }
+        ],
+        "ipsec_links": [
+          {
+            "interface": "st0.1",
+            "description": "m1-rtk-ipsec",
+            "local_ip": "10.99.0.2",
+            "remote_ip": "10.99.0.1",
+            "loss": 15
+          }
+        ]
+      }
+    }
+  ]
+}
