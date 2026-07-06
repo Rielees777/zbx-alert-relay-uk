@@ -1,25 +1,52 @@
 """
-junos/switcher.py — переключение канала основной/резервный обменом
-BGP-политик import/export между двумя соседями группы.
+junos/switcher.py — инвентаризация BGP-каналов связи и (пока отключённое)
+переключение основной/резервный.
 
-Приоритет каналов задан парами политик на соседях группы ebgp:
+Приоритет канала задан суффиксом -P<n> в именах политик import/export
+соседа: P1 — основной, P2 — резервный, P3/P4 — далее по порядку.
+Имена политик могут различаться по группам (eBGP-IN-P1,
+eBGP-IN-DC-MOSCOW-P2, eBGP-IN-HUB…) — приоритет берётся из суффикса
+import-политики, а если его там нет (напр. eBGP-IN-HUB) — из export.
 
-    neighbor 10.10.249.9  description m1-ttk-l2vpn      # основной
-    neighbor 10.10.249.9  import eBGP-IN-P1 / export eBGP-OUT-P1
-    neighbor 10.10.255.14 description n11-avantel-l2vpn # резервный
-    neighbor 10.10.255.14 import eBGP-IN-P2 / export eBGP-OUT-P2
-
-Переключение = поменять пары политик местами (P1 ↔ P2). Операция
-симметрична: повторный вызов возвращает всё обратно.
+BgpChannelParser.channels() разбирает ВСЕ группы protocols/bgp и отдаёт
+список BgpChannel: группа, IP соседа, описание, политики, приоритет.
 
 Здесь только чистая логика (парсинг конфига + генерация set-команд),
-без подключения к устройству — работу с железом делает
-JunosApi.switch_channel (junos/api.py).
+без подключения к устройству — работу с железом делает JunosApi
+(junos/api.py).
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+
+# Суффикс приоритета в имени политики: eBGP-IN-P3 → 3, eBGP-IN-DC-MOSCOW-P1 → 1
+_PRIORITY_RE = re.compile(r"-P(\d+)$", re.IGNORECASE)
+
+
+@dataclass
+class BgpChannel:
+    """Один канал связи = BGP-сосед с политиками и приоритетом."""
+    group:       str                # имя BGP-группы (ebgp, DC-MOSCOW, …)
+    neighbor:    str                # IP соседа
+    description: str | None         # напр. "m1-rtk-l2vpn"
+    imports:     list[str] = field(default_factory=list)   # группы префиксов import
+    exports:     list[str] = field(default_factory=list)   # группы префиксов export
+    priority:    int | None = None  # из суффикса -P<n>: 1 — основной, 2 — резервный…
+
+    @property
+    def is_primary(self) -> bool:
+        return self.priority == 1
+
+
+def _policy_priority(imports: list[str], exports: list[str]) -> int | None:
+    """Приоритет из суффикса -P<n>: сначала ищем в import, затем в export."""
+    for name in (*imports, *exports):
+        m = _PRIORITY_RE.search(name)
+        if m:
+            return int(m.group(1))
+    return None
 
 
 @dataclass
@@ -72,6 +99,30 @@ class BgpPolicySwitcher:
 
     def __init__(self, config_xml) -> None:
         self.root = self._strip_ns(config_xml)
+
+    def channels(self) -> list[BgpChannel]:
+        """
+        Полный список каналов связи по ВСЕМ BGP-группам конфига:
+        группа, IP соседа, описание, группы префиксов import/export и
+        приоритет из суффикса -P<n> имён политик.
+        """
+        result: list[BgpChannel] = []
+        for grp in self.root.iter("group"):
+            group_name = self._text(grp, "name")
+            if not group_name:
+                continue
+            for nb in grp.findall("neighbor"):
+                imports = [self._el_text(e) for e in nb.findall("import")]
+                exports = [self._el_text(e) for e in nb.findall("export")]
+                result.append(BgpChannel(
+                    group       = group_name,
+                    neighbor    = self._text(nb, "name"),
+                    description = self._text(nb, "description") or None,
+                    imports     = imports,
+                    exports     = exports,
+                    priority    = _policy_priority(imports, exports),
+                ))
+        return result
 
     def neighbors(self, group: str) -> list[BgpNeighbor]:
         result: list[BgpNeighbor] = []
@@ -134,3 +185,8 @@ class BgpPolicySwitcher:
     @staticmethod
     def _el_text(el) -> str:
         return (el.text or "").strip()
+
+
+# Основное имя для инвентаризации каналов; BgpPolicySwitcher оставлено
+# как историческое (там же живёт пока отключённый план обмена политик).
+BgpChannelParser = BgpPolicySwitcher

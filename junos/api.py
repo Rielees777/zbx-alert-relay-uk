@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 
-from const import JUNOS_WANT_IPSEC, JUNOS_WANT_L2VPN
+from const import CHANNEL_SWITCHING_ENABLED, JUNOS_WANT_IPSEC, JUNOS_WANT_L2VPN
 from models import IncidentReport, PingResult, RpmProblem
 from junos.parser import JunosInterfaceParser
 from junos.pinger import JunosPinger
-from junos.switcher import BgpPolicySwitcher, SwitchResult
+from junos.switcher import BgpChannel, BgpChannelParser, BgpPolicySwitcher, SwitchResult
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,26 @@ class JunosApi:
             )
             return []
 
+    def list_bgp_channels(self, host_ip: str) -> list[BgpChannel]:
+        """
+        Инвентаризация каналов связи устройства: все BGP-группы и их соседи
+        с описанием, группами префиксов import/export и приоритетом из
+        суффикса -P<n> имён политик (1 — основной, 2 — резервный, …).
+        """
+        from lxml import etree
+
+        with self._connect(host_ip) as dev:
+            bgp_filter = etree.XML("<configuration><protocols><bgp/></protocols></configuration>")
+            cfg_xml    = dev.rpc.get_config(filter_xml=bgp_filter)
+
+        channels = BgpChannelParser(cfg_xml).channels()
+        logger.info(
+            "BGP-каналы %s: %d шт. (%s)",
+            host_ip, len(channels),
+            ", ".join(f"{c.description or c.neighbor}:P{c.priority or '?'}" for c in channels),
+        )
+        return channels
+
     def switch_channel(
         self,
         problem:         RpmProblem,
@@ -75,8 +95,9 @@ class JunosApi:
         import/export между двумя соседями группы (P1 ↔ P2). Операция
         симметрична — повторный вызов возвращает исходное состояние.
 
-        Предназначен для вызова при деградации L2VPN или потерях в IPSEC
-        (условия задаёт вызывающая сторона — pipeline).
+        ВРЕМЕННО ОТКЛЮЧЕНО (const.CHANNEL_SWITCHING_ENABLED = False):
+        логика пересматривается под приоритеты каналов по всем группам —
+        см. list_bgp_channels.
 
         dry_run=True — построить план, загрузить кандидат-конфиг, снять diff
         и откатить БЕЗ commit (безопасная проверка на живом устройстве).
@@ -86,6 +107,13 @@ class JunosApi:
         устройство само откатится через N минут. None — обычный commit.
         """
         result = SwitchResult(success=False, dry_run=dry_run, group=group)
+        if not CHANNEL_SWITCHING_ENABLED:
+            result.error = (
+                "Переключение каналов временно отключено "
+                "(const.CHANNEL_SWITCHING_ENABLED = False)"
+            )
+            logger.warning("switch_channel: %s (host=%s)", result.error, problem.host_name)
+            return result
         if not problem.ip:
             result.error = f"Нет IP для хоста '{problem.host_name}'"
             return result
