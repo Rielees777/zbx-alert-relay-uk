@@ -48,6 +48,7 @@ class RpmProblem:
     trigger_loss_pct: float | None = None   # % потерь из имени триггера
     hostid:       str = ""                  # hostid Zabbix (для запроса item'ов утилизации)
     channel_spec: str | None = None         # "m1-rtk-l2vpn" — как в ключах item'ов isp.*
+    site_alert:   bool = False              # триггер "Потери до <имя площадки>"
 
     @property
     def is_active(self) -> bool:

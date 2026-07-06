@@ -66,6 +66,7 @@ class ZabbixProblems(ZabbixClient):
                 trigger_loss_pct=trigger.loss_pct,
                 hostid=h["hostid"],
                 channel_spec=trigger.channel_spec,
+                site_alert=trigger.is_site,
             ))
         return result
 

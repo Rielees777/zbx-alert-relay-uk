@@ -32,7 +32,11 @@ class JunosInterfaceParser:
                 desc = self._text(log, "description") or phys_desc
                 d    = desc.lower()
 
-                if not (cod_l and cod_l in d and want_l in d):
+                # Тип (l2vpn/ipsec) обязателен в description; COD — только
+                # если задан (site-алерты ищут линки без фильтра по COD).
+                if want_l not in d:
+                    continue
+                if cod_l and cod_l not in d:
                     continue
 
                 for af in log.findall("address-family"):

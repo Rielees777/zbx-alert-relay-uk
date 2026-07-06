@@ -26,7 +26,9 @@ class JunosApi:
                 problem=problem,
                 error=f"Нет IP для хоста '{problem.host_name}'",
             )
-        if not problem.cod_name:
+        # Для site-алертов ("Потери до <площадка>") COD в имени триггера нет —
+        # линки ищутся на устройстве без фильтра по COD, только по типу.
+        if not problem.cod_name and not problem.site_alert:
             return IncidentReport(
                 problem=problem,
                 error=f"Не удалось определить COD из триггера (host={problem.host_name})",
@@ -35,7 +37,7 @@ class JunosApi:
         try:
             with self._connect(problem.ip) as dev:
                 parser  = JunosInterfaceParser.from_device(dev)
-                links   = parser.l2vpn_links(cod_name=problem.cod_name, want=JUNOS_WANT_L2VPN)
+                links   = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_L2VPN)
                 pinger  = JunosPinger(dev)
                 results = [pinger.ping_link(link, count=count) for link in links]
         except ConnectError as exc:
@@ -53,12 +55,12 @@ class JunosApi:
         return IncidentReport(problem=problem, ping_results=results)
 
     def analyze_ipsec(self, problem: RpmProblem, count: int = 100) -> list[PingResult]:
-        if not problem.ip or not problem.cod_name:
+        if not problem.ip or (not problem.cod_name and not problem.site_alert):
             return []
         try:
             with self._connect(problem.ip) as dev:
                 parser = JunosInterfaceParser.from_device(dev)
-                links  = parser.l2vpn_links(cod_name=problem.cod_name, want=JUNOS_WANT_IPSEC)
+                links  = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_IPSEC)
                 pinger = JunosPinger(dev)
                 return [pinger.ping_link(link, count=count) for link in links]
         except Exception as exc:

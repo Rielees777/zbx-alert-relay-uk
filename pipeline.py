@@ -41,7 +41,9 @@ def _collect_problems(
     result: list[RpmProblem] = []
     for pattern in TRIGGER_PATTERNS:
         for p in zabbix_api.get_active_rpm_problems(pattern=pattern, minutes=active_minutes):
-            if p.channel_type not in ALLOWED_CHANNEL_TYPES:
+            # Site-алерты ("Потери до <площадка>") обрабатываются всегда;
+            # канальные — только l2vpn.
+            if not p.site_alert and p.channel_type not in ALLOWED_CHANNEL_TYPES:
                 logger.debug("Игнорирую не-l2vpn инцидент (channel_type=%r): %s",
                              p.channel_type, p.trigger_name)
                 continue

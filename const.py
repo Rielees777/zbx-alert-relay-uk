@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 
 TRIGGER_PATTERNS: list[str] = [
-    "RPM потери до",
+    "RPM потери до",   # канальный алерт: "RPM потери до m1-rtk-l2vpn - 20 %"
+    "Потери до",       # site-алерт: "Потери до <видимое имя узла>"
 ]
 
 # Обрабатываются только инциденты L2VPN-каналов. Всё остальное — inet,

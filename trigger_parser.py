@@ -17,9 +17,19 @@ _TYPE_TO_SERVICE = {"inet": "интернет"}
 _SPEC_RE = re.compile(r'до\s+(?P<spec>\S+)', re.IGNORECASE)
 _LOSS_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*%')
 
+# Site-триггер: "Потери до <видимое имя узла>", напр.
+# "Потери до Санкт-Петербург, ул. Киевская д. 5, корп. 4".
+# Якорь начала строки отличает его от "RPM потери до <канал>".
+# Возможный хвост " - NN %" отрезается от имени площадки.
+_SITE_RE = re.compile(
+    r'^\s*Потери\s+до\s+(?P<site>.+?)(?:\s*-\s*\d+(?:[.,]\d+)?\s*%\s*)?$',
+    re.IGNORECASE,
+)
+
 
 class TriggerInfo:
-    """Распарсенный триггер Zabbix: узел, (опц.) провайдер, тип канала."""
+    """Распарсенный триггер Zabbix: узел, (опц.) провайдер, тип канала.
+    Либо site-триггер («Потери до <имя площадки>») — тогда is_site=True."""
 
     def __init__(self, raw: str) -> None:
         self.raw          = raw
@@ -29,22 +39,29 @@ class TriggerInfo:
         self.channel_type: str | None   = None   # l2vpn / inet / ipsec
         self.loss_pct:     float | None = None   # % потерь из имени триггера
         self.channel_spec: str | None   = None   # "m1-rtk-l2vpn" — как в ключах item'ов Zabbix
+        self.is_site:      bool         = False  # триггер вида "Потери до <площадка>"
+        self.site_name:    str | None   = None   # имя площадки (= видимое имя узла)
 
-        m = _SPEC_RE.search(raw)
-        if m:
-            self.channel_spec = m.group("spec")
-            parts = [p for p in m.group("spec").split("-") if p]
-            if parts:
-                self.node = parts[0]
-                rest = parts[1:]
-                # Последний сегмент — тип канала, если это известный тип.
-                if rest and rest[-1].lower() in _CHANNEL_TYPES:
-                    self.channel_type = rest[-1].lower()
-                    rest = rest[:-1]
-                # Что осталось между узлом и типом — провайдер (для inet его нет).
-                if rest:
-                    self.provider_raw = rest[0]
-                    self.provider     = normalize_provider(rest[0])
+        m_site = _SITE_RE.match(raw)
+        if m_site:
+            self.is_site   = True
+            self.site_name = m_site.group("site").strip()
+        else:
+            m = _SPEC_RE.search(raw)
+            if m:
+                self.channel_spec = m.group("spec")
+                parts = [p for p in m.group("spec").split("-") if p]
+                if parts:
+                    self.node = parts[0]
+                    rest = parts[1:]
+                    # Последний сегмент — тип канала, если это известный тип.
+                    if rest and rest[-1].lower() in _CHANNEL_TYPES:
+                        self.channel_type = rest[-1].lower()
+                        rest = rest[:-1]
+                    # Что осталось между узлом и типом — провайдер (для inet его нет).
+                    if rest:
+                        self.provider_raw = rest[0]
+                        self.provider     = normalize_provider(rest[0])
 
         m_loss = _LOSS_RE.search(raw)
         if m_loss:
@@ -77,6 +94,16 @@ def find_channel_by_trigger(
     trigger = TriggerInfo(trigger_name)
     if not site.channels:
         return None
+
+    # Site-триггер («Потери до <площадка>»): провайдера в имени нет —
+    # берём l2vpn-канал площадки (как и для канальных алертов, обрабатываем
+    # только L2VPN).
+    if trigger.is_site:
+        typed = [ch for ch in site.channels
+                 if ch.service and "l2vpn" in ch.service.lower()]
+        if typed:
+            return typed[0]
+        return site.channels[0] if len(site.channels) == 1 else None
 
     matches = list(site.channels)
 

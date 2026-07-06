@@ -74,6 +74,45 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
     return subject, body
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ШАБЛОН ПИСЬМА ДЛЯ SITE-АЛЕРТОВ («Потери до <имя площадки>»).
+# Пока текст идентичен канальным алертам — правьте строки ниже под свои нужды,
+# на канальные письма (build_provider_email выше) это не повлияет.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
+    """(subject, body) письма оператору для site-алерта."""
+    p   = report.problem
+    cod = get_cod_by_name(p.cod_name)
+
+    contract = _contract(report, cod)
+    address  = _address(report)
+    service  = _service(report)
+
+    if report.decision == IncidentDecision.CHANNEL_DOWN:
+        loss_line = "        - Потери ICMP: 100% (канал недоступен)"
+    else:
+        loss_line = f"        - Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
+
+    util = report.utilization_pct
+    util_line = (
+        f"Утилизация канала в пике за период инцидента: {util:.0f}%"
+        if util is not None
+        else "Утилизация канала в пике за период инцидента: данные недоступны"
+    )
+
+    subject = f"Проблема на канале связи {service}: {address}"
+    body = (
+        f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.\n"
+        f"Договор: {contract}\n"
+        f"Результаты проверки L2VPN-транспорта:\n"
+        f"{loss_line}\n"
+        f"{util_line}\n"
+        f"Просим взять в работу."
+    )
+    return subject, body
+
+
 def resolve_recipient(report: IncidentReport, settings) -> str | None:
     """Email оператора: по провайдеру из канала Pyrus, иначе запасной адрес."""
     cod = get_cod_by_name(report.problem.cod_name)
@@ -142,7 +181,10 @@ def send_provider_notification(settings, report: IncidentReport) -> bool:
         )
         return False
 
-    subject, body = build_provider_email(report)
+    if report.problem.site_alert:
+        subject, body = build_site_provider_email(report)
+    else:
+        subject, body = build_provider_email(report)
     try:
         message_id = MailClient(settings).send(to_addr, subject, body)
         logger.info("Письмо оператору отправлено на %s (host=%s, message_id=%s)",

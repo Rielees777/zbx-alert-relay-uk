@@ -1,0 +1,58 @@
+{
+  "_readme": "СЛУЧАЙ 8: SITE-АЛЕРТ «Потери до <имя площадки>» — имя в триггере совпадает с видимым именем узла. COD/провайдера в имени нет: junos ищет l2vpn-линки без фильтра по COD, договор берётся из l2vpn-канала Pyrus по IP. Тексты сообщения и письма — из отдельных site-шаблонов (notifier.format_site_*, mailer.build_site_provider_email).",
+
+  "pyrus_sites": [
+    {
+      "task_id": 9,
+      "directorate": "УК-СПб",
+      "zabbix_hostname": "uk-spb-kievskaya5-r",
+      "router_ip": "10.70.140.17",
+      "address": "Санкт-Петербург, ул. Киевская д. 5, корп. 4",
+      "channels": [
+        {
+          "provider": "Обит",
+          "service": "L2VPN",
+          "technology": "ВОЛС",
+          "contract": "СПБ-77/2023",
+          "bandwidth": 100000
+        },
+        {
+          "provider": "МегаФон",
+          "service": "Интернет",
+          "technology": "Ethernet",
+          "contract": "СПБ-77-INET",
+          "bandwidth": 50000
+        }
+      ]
+    }
+  ],
+
+  "alerts": [
+    {
+      "notes": "Site-алерт, 20% потерь на l2vpn-линке площадки -> DEGRADED_CHANNEL (утилизация неизвестна: у site-триггера нет channel_spec для item'ов isp.*)",
+      "zabbix_event": {
+        "eventid": "900008",
+        "name": "Потери до Санкт-Петербург, ул. Киевская д. 5, корп. 4",
+        "severity": "3",
+        "clock": 1719800000,
+        "r_eventid": "0",
+        "hosts": [
+          {"hostid": "12001", "host": "10.70.140.17", "name": "Санкт-Петербург, ул. Киевская д. 5, корп. 4"}
+        ]
+      },
+      "host_ip": "10.70.140.17",
+      "junos": {
+        "l2vpn_links": [
+          {
+            "interface": "ge-0/0/1.0",
+            "description": "uk-spb-kievskaya5-l2vpn uplink",
+            "local_ip": "10.10.252.42",
+            "remote_ip": "10.10.252.41",
+            "loss": 20
+          }
+        ],
+        "ipsec_links": []
+      }
+    }
+  ]
+}

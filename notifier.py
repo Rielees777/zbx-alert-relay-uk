@@ -103,8 +103,64 @@ def format_channel_down_message(report: IncidentReport) -> str:
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ШАБЛОНЫ ДЛЯ SITE-АЛЕРТОВ («Потери до <имя площадки>»).
+# Пока текст идентичен канальным алертам — правьте строки ниже под свои нужды,
+# на канальные сообщения (format_*_message выше) это не повлияет.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def format_site_degradation_message(report: IncidentReport) -> str:
+    p   = report.problem
+    cod = get_cod_by_name(p.cod_name)
+
+    operator = _operator(report, cod)
+    contract = _contract(report, cod)
+    address  = p.host_name or "—"
+
+    loss_pct = _avg_loss_pct(report.ping_results)
+    util_str = _utilization_str(report.utilization_pct)
+
+    return (
+        f"Зафиксирована деградация на канале связи L2VPN. "
+        f"Прошу сформировать и направить обращение оператору связи {operator} "
+        f"для проверки и устранения проблемы.\n"
+        f"Диагностическая информация:\n"
+        f"1. Адрес площадки: {address}\n"
+        f"2. Идентификатор канала (номер договора): {contract}\n"
+        f"3. Результаты проверки L2VPN-транспорта:\n"
+        f"   - Потери ICMP: {loss_pct:.0f}%\n"
+        f"4. Утилизация канала в пике за период инцидента: {util_str}"
+    )
+
+
+def format_site_channel_down_message(report: IncidentReport) -> str:
+    p   = report.problem
+    cod = get_cod_by_name(p.cod_name)
+
+    operator = _operator(report, cod)
+    contract = _contract(report, cod)
+    address  = p.host_name or "—"
+
+    return (
+        f"Канал связи L2VPN полностью недоступен (потери ICMP 100%).\n"
+        f"Прошу сформировать и направить обращение оператору связи {operator} "
+        f"для проверки и устранения проблемы.\n"
+        f"Диагностическая информация:\n"
+        f"1. Адрес площадки: {address}\n"
+        f"2. Идентификатор канала (номер договора): {contract}\n"
+        f"3. Результаты проверки L2VPN-транспорта:\n"
+        f"   - Потери ICMP: 100% (канал недоступен)"
+    )
+
+
 def build_notification(report: IncidentReport) -> str | None:
     d = report.decision
+    if report.problem.site_alert:
+        if d == IncidentDecision.CHANNEL_DOWN:
+            return format_site_channel_down_message(report)
+        if d in (IncidentDecision.DEGRADED_CHANNEL, IncidentDecision.HIGH_UTILIZATION):
+            return format_site_degradation_message(report)
+        return None
     if d == IncidentDecision.CHANNEL_DOWN:
         return format_channel_down_message(report)
     if d in (IncidentDecision.DEGRADED_CHANNEL, IncidentDecision.HIGH_UTILIZATION):
