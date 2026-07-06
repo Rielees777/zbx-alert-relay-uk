@@ -27,7 +27,7 @@ class JunosApi:
                 error=f"Нет IP для хоста '{problem.host_name}'",
             )
         # Для site-алертов ("Потери до <площадка>") COD в имени триггера нет —
-        # цели берутся из BGP-конфига, а интерфейсный фолбэк ищет только по типу.
+        # интерфейсные линки ищутся на устройстве без фильтра по COD.
         if not problem.cod_name and not problem.site_alert:
             return IncidentReport(
                 problem=problem,
@@ -36,19 +36,11 @@ class JunosApi:
         from jnpr.junos.exception import ConnectError
         try:
             with self._connect(problem.ip) as dev:
-                # Основной способ: цели пинга из BGP-конфига устройства —
-                # description соседа совпадает с channel_spec триггера, IP
-                # соседа = реальный адрес дальнего конца канала.
-                links = self._bgp_ping_targets(dev, problem)
-                if not links:
-                    # Фолбэк: старый способ — по description интерфейсов
-                    # (COD + тип) с вычислением соседа по /30.
-                    logger.debug(
-                        "BGP-цели не найдены (host=%s) — фолбэк на интерфейсы",
-                        problem.host_name,
-                    )
-                    parser = JunosInterfaceParser.from_device(dev)
-                    links  = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_L2VPN)
+                # Транспорт L2VPN проверяется по ИНТЕРФЕЙСНЫМ адресам каналов
+                # (серые /30 на L2). Адреса BGP-соседей — это IPSEC-туннели
+                # поверх каналов, их проверяет analyze_ipsec.
+                parser  = JunosInterfaceParser.from_device(dev)
+                links   = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_L2VPN)
                 pinger  = JunosPinger(dev)
                 results = [pinger.ping_link(link, count=count) for link in links]
         except ConnectError as exc:
@@ -66,12 +58,24 @@ class JunosApi:
         return IncidentReport(problem=problem, ping_results=results)
 
     def analyze_ipsec(self, problem: RpmProblem, count: int = 100) -> list[PingResult]:
+        """
+        Проверка IPSEC-туннелей. Адреса BGP-соседей — это и есть адреса
+        туннелей, построенных поверх каналов (description соседа называет
+        транспортный канал: "m1-rtk-l2vpn"), поэтому цели пинга берутся из
+        BGP-конфига; фолбэк — прежний поиск ipsec-интерфейсов по description.
+        """
         if not problem.ip or (not problem.cod_name and not problem.site_alert):
             return []
         try:
             with self._connect(problem.ip) as dev:
-                parser = JunosInterfaceParser.from_device(dev)
-                links  = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_IPSEC)
+                links = self._bgp_ping_targets(dev, problem)
+                if not links:
+                    logger.debug(
+                        "BGP-соседи для IPSEC не найдены (host=%s) — фолбэк на интерфейсы",
+                        problem.host_name,
+                    )
+                    parser = JunosInterfaceParser.from_device(dev)
+                    links  = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_IPSEC)
                 pinger = JunosPinger(dev)
                 return [pinger.ping_link(link, count=count) for link in links]
         except Exception as exc:
@@ -90,10 +94,12 @@ class JunosApi:
 
     def _bgp_ping_targets(self, dev, problem: RpmProblem) -> list[L2vpnLink]:
         """
-        Цели пинга из BGP-конфига устройства (замена справочника COD):
-          • канальный алерт — сосед, чей description совпадает с
-            channel_spec триггера ("m1-rtk-l2vpn");
-          • site-алерт — все l2vpn-соседи площадки.
+        Цели пинга IPSEC-туннелей из BGP-конфига устройства: адрес
+        BGP-соседа = адрес туннеля, а description соседа называет
+        транспортный канал, через который туннель построен:
+          • канальный алерт — туннель через канал из триггера
+            (description == channel_spec, напр. "m1-rtk-l2vpn");
+          • site-алерт — все туннели через l2vpn-каналы площадки.
         Пингуется IP соседа; source — local-address соседа, если задан.
         Пустой список — вызывающий код уходит в интерфейсный фолбэк.
         """
