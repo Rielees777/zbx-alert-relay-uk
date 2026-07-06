@@ -16,10 +16,10 @@ from models import IncidentDecision, IncidentReport, RpmProblem
 logger = logging.getLogger(__name__)
 
 
-def run(zabbix_api, junos_api, matcher=None) -> list[IncidentReport]:
-    problems = _collect_problems(zabbix_api, ACTIVE_MINUTES)
+def run(zabbix_api, junos_api, matcher=None, skip_eventids: frozenset[str] = frozenset()) -> list[IncidentReport]:
+    problems = _collect_problems(zabbix_api, ACTIVE_MINUTES, skip_eventids)
     if not problems:
-        logger.debug("Активных RPM-проблем не найдено.")
+        logger.debug("Активных RPM-проблем для обработки не найдено.")
         return []
 
     logger.info("Найдено RPM-проблем: %d", len(problems))
@@ -32,7 +32,11 @@ def run(zabbix_api, junos_api, matcher=None) -> list[IncidentReport]:
     return reports
 
 
-def _collect_problems(zabbix_api, active_minutes: int) -> list[RpmProblem]:
+def _collect_problems(
+    zabbix_api,
+    active_minutes: int,
+    skip_eventids:  frozenset[str] = frozenset(),
+) -> list[RpmProblem]:
     seen:   set[str]         = set()
     result: list[RpmProblem] = []
     for pattern in TRIGGER_PATTERNS:
@@ -40,6 +44,11 @@ def _collect_problems(zabbix_api, active_minutes: int) -> list[RpmProblem]:
             if p.channel_type not in ALLOWED_CHANNEL_TYPES:
                 logger.debug("Игнорирую не-l2vpn инцидент (channel_type=%r): %s",
                              p.channel_type, p.trigger_name)
+                continue
+            # Уже отработанный инцидент (письмо направлено) — больше не
+            # реагируем: ни junos-проверок, ни сообщений.
+            if p.eventid in skip_eventids:
+                logger.debug("Инцидент %s уже отработан — пропуск", p.eventid)
                 continue
             if p.eventid not in seen:
                 seen.add(p.eventid)
