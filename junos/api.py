@@ -8,7 +8,7 @@ from const import (
     JUNOS_WANT_L2VPN,
     PRIORITY_BGP_GROUPS,
 )
-from models import IncidentReport, PingResult, RpmProblem
+from models import IncidentReport, L2vpnLink, PingResult, RpmProblem
 from junos.parser import JunosInterfaceParser
 from junos.pinger import JunosPinger
 from junos.switcher import BgpChannel, BgpChannelParser, BgpPolicySwitcher, SwitchResult
@@ -27,7 +27,7 @@ class JunosApi:
                 error=f"Нет IP для хоста '{problem.host_name}'",
             )
         # Для site-алертов ("Потери до <площадка>") COD в имени триггера нет —
-        # линки ищутся на устройстве без фильтра по COD, только по типу.
+        # цели берутся из BGP-конфига, а интерфейсный фолбэк ищет только по типу.
         if not problem.cod_name and not problem.site_alert:
             return IncidentReport(
                 problem=problem,
@@ -36,8 +36,19 @@ class JunosApi:
         from jnpr.junos.exception import ConnectError
         try:
             with self._connect(problem.ip) as dev:
-                parser  = JunosInterfaceParser.from_device(dev)
-                links   = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_L2VPN)
+                # Основной способ: цели пинга из BGP-конфига устройства —
+                # description соседа совпадает с channel_spec триггера, IP
+                # соседа = реальный адрес дальнего конца канала.
+                links = self._bgp_ping_targets(dev, problem)
+                if not links:
+                    # Фолбэк: старый способ — по description интерфейсов
+                    # (COD + тип) с вычислением соседа по /30.
+                    logger.debug(
+                        "BGP-цели не найдены (host=%s) — фолбэк на интерфейсы",
+                        problem.host_name,
+                    )
+                    parser = JunosInterfaceParser.from_device(dev)
+                    links  = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_L2VPN)
                 pinger  = JunosPinger(dev)
                 results = [pinger.ping_link(link, count=count) for link in links]
         except ConnectError as exc:
@@ -70,6 +81,46 @@ class JunosApi:
             )
             return []
 
+    @staticmethod
+    def _read_bgp_config(dev):
+        """XML-конфиг ветки protocols/bgp с открытого устройства."""
+        from lxml import etree
+        bgp_filter = etree.XML("<configuration><protocols><bgp/></protocols></configuration>")
+        return dev.rpc.get_config(filter_xml=bgp_filter)
+
+    def _bgp_ping_targets(self, dev, problem: RpmProblem) -> list[L2vpnLink]:
+        """
+        Цели пинга из BGP-конфига устройства (замена справочника COD):
+          • канальный алерт — сосед, чей description совпадает с
+            channel_spec триггера ("m1-rtk-l2vpn");
+          • site-алерт — все l2vpn-соседи площадки.
+        Пингуется IP соседа; source — local-address соседа, если задан.
+        Пустой список — вызывающий код уходит в интерфейсный фолбэк.
+        """
+        try:
+            channels = BgpChannelParser(self._read_bgp_config(dev)).channels()
+        except Exception as exc:
+            logger.warning("Не удалось прочитать BGP-конфиг %s: %s", problem.ip, exc)
+            return []
+
+        if problem.site_alert:
+            targets = [c for c in channels if c.channel_type == "l2vpn"]
+        elif problem.channel_spec:
+            spec = problem.channel_spec.lower()
+            targets = [c for c in channels if (c.description or "").lower() == spec]
+        else:
+            targets = []
+
+        return [
+            L2vpnLink(
+                interface   = f"bgp:{c.group}",
+                description = c.description or "",
+                local_ip    = c.local_address or "",
+                remote_ip   = c.neighbor,
+            )
+            for c in targets
+        ]
+
     def list_bgp_channels(self, host_ip: str) -> list[BgpChannel]:
         """
         Инвентаризация каналов связи устройства: все BGP-группы и их соседи
@@ -80,11 +131,8 @@ class JunosApi:
         (const.PRIORITY_BGP_GROUPS, напр. DC-MOSCOW), затем остальные;
         внутри группы — по P1..Pn.
         """
-        from lxml import etree
-
         with self._connect(host_ip) as dev:
-            bgp_filter = etree.XML("<configuration><protocols><bgp/></protocols></configuration>")
-            cfg_xml    = dev.rpc.get_config(filter_xml=bgp_filter)
+            cfg_xml = self._read_bgp_config(dev)
 
         channels = BgpChannelParser(cfg_xml).channels(priority_groups=PRIORITY_BGP_GROUPS)
         logger.info(
@@ -131,11 +179,9 @@ class JunosApi:
 
         try:
             from jnpr.junos.utils.config import Config
-            from lxml import etree
 
             with self._connect(problem.ip) as dev:
-                bgp_filter = etree.XML("<configuration><protocols><bgp/></protocols></configuration>")
-                cfg_xml    = dev.rpc.get_config(filter_xml=bgp_filter)
+                cfg_xml = self._read_bgp_config(dev)
 
                 plan = BgpPolicySwitcher(cfg_xml).plan_swap(
                     group=group, channel_spec=problem.channel_spec,

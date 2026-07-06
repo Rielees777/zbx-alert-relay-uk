@@ -24,22 +24,36 @@ from dataclasses import dataclass, field
 # Суффикс приоритета в имени политики: eBGP-IN-P3 → 3, eBGP-IN-DC-MOSCOW-P1 → 1
 _PRIORITY_RE = re.compile(r"-P(\d+)$", re.IGNORECASE)
 
+# Типы канала в description соседа. Позиция сегмента различается
+# ("m1-rtk-l2vpn", "n11-inet-megafon", "uk-spb-obvod60-l2vpn-obit"),
+# поэтому тип ищется среди всех сегментов, а не по позиции.
+_CHANNEL_TYPES = frozenset({"l2vpn", "inet", "ipsec"})
+
 
 @dataclass
 class BgpChannel:
     """Один канал связи = BGP-сосед с политиками и приоритетом."""
-    group:       str                # имя BGP-группы (ebgp, DC-MOSCOW, …)
-    neighbor:    str                # IP соседа
-    description: str | None         # напр. "m1-rtk-l2vpn"
-    imports:     list[str] = field(default_factory=list)   # группы префиксов import
-    exports:     list[str] = field(default_factory=list)   # группы префиксов export
-    priority:    int | None = None  # из суффикса -P<n>: 1 — основной, 2 — резервный…
-    group_rank:  int = 0            # приоритет группы: 0 — самая приоритетная
-                                    # (PRIORITY_BGP_GROUPS), дальше — ниже
+    group:         str                # имя BGP-группы (ebgp, DC-MOSCOW, …)
+    neighbor:      str                # IP соседа
+    description:   str | None         # напр. "m1-rtk-l2vpn"
+    imports:       list[str] = field(default_factory=list)   # группы префиксов import
+    exports:       list[str] = field(default_factory=list)   # группы префиксов export
+    priority:      int | None = None  # из суффикса -P<n>: 1 — основной, 2 — резервный…
+    group_rank:    int = 0            # приоритет группы: 0 — самая приоритетная
+                                      # (PRIORITY_BGP_GROUPS), дальше — ниже
+    local_address: str | None = None  # local-address соседа, если задан в конфиге
 
     @property
     def is_primary(self) -> bool:
         return self.priority == 1
+
+    @property
+    def channel_type(self) -> str | None:
+        """Тип канала (l2vpn/inet/ipsec) из сегментов description."""
+        for seg in (self.description or "").lower().split("-"):
+            if seg in _CHANNEL_TYPES:
+                return seg
+        return None
 
 
 def _policy_priority(imports: list[str], exports: list[str]) -> int | None:
@@ -129,13 +143,14 @@ class BgpPolicySwitcher:
                 imports = [self._el_text(e) for e in nb.findall("import")]
                 exports = [self._el_text(e) for e in nb.findall("export")]
                 result.append(BgpChannel(
-                    group       = group_name,
-                    neighbor    = self._text(nb, "name"),
-                    description = self._text(nb, "description") or None,
-                    imports     = imports,
-                    exports     = exports,
-                    priority    = _policy_priority(imports, exports),
-                    group_rank  = rank,
+                    group         = group_name,
+                    neighbor      = self._text(nb, "name"),
+                    description   = self._text(nb, "description") or None,
+                    imports       = imports,
+                    exports       = exports,
+                    priority      = _policy_priority(imports, exports),
+                    group_rank    = rank,
+                    local_address = self._text(nb, "local-address") or None,
                 ))
         # Сортировка стабильная: приоритетные группы выше, внутри группы — P1..Pn.
         result.sort(key=lambda c: (c.group_rank, c.priority is None, c.priority or 0))
