@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import logging
 
-from const import CHANNEL_SWITCHING_ENABLED, JUNOS_WANT_IPSEC, JUNOS_WANT_L2VPN
+from const import (
+    CHANNEL_SWITCHING_ENABLED,
+    JUNOS_WANT_IPSEC,
+    JUNOS_WANT_L2VPN,
+    PRIORITY_BGP_GROUPS,
+)
 from models import IncidentReport, PingResult, RpmProblem
 from junos.parser import JunosInterfaceParser
 from junos.pinger import JunosPinger
@@ -68,6 +73,10 @@ class JunosApi:
         Инвентаризация каналов связи устройства: все BGP-группы и их соседи
         с описанием, группами префиксов import/export и приоритетом из
         суффикса -P<n> имён политик (1 — основной, 2 — резервный, …).
+
+        Список отсортирован: сначала каналы приоритетных групп
+        (const.PRIORITY_BGP_GROUPS, напр. DC-MOSCOW), затем остальные;
+        внутри группы — по P1..Pn.
         """
         from lxml import etree
 
@@ -75,11 +84,11 @@ class JunosApi:
             bgp_filter = etree.XML("<configuration><protocols><bgp/></protocols></configuration>")
             cfg_xml    = dev.rpc.get_config(filter_xml=bgp_filter)
 
-        channels = BgpChannelParser(cfg_xml).channels()
+        channels = BgpChannelParser(cfg_xml).channels(priority_groups=PRIORITY_BGP_GROUPS)
         logger.info(
             "BGP-каналы %s: %d шт. (%s)",
             host_ip, len(channels),
-            ", ".join(f"{c.description or c.neighbor}:P{c.priority or '?'}" for c in channels),
+            ", ".join(f"{c.group}/{c.description or c.neighbor}:P{c.priority or '?'}" for c in channels),
         )
         return channels
 

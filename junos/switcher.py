@@ -34,6 +34,8 @@ class BgpChannel:
     imports:     list[str] = field(default_factory=list)   # группы префиксов import
     exports:     list[str] = field(default_factory=list)   # группы префиксов export
     priority:    int | None = None  # из суффикса -P<n>: 1 — основной, 2 — резервный…
+    group_rank:  int = 0            # приоритет группы: 0 — самая приоритетная
+                                    # (PRIORITY_BGP_GROUPS), дальше — ниже
 
     @property
     def is_primary(self) -> bool:
@@ -100,17 +102,29 @@ class BgpPolicySwitcher:
     def __init__(self, config_xml) -> None:
         self.root = self._strip_ns(config_xml)
 
-    def channels(self) -> list[BgpChannel]:
+    def channels(self, priority_groups: tuple[str, ...] = ()) -> list[BgpChannel]:
         """
         Полный список каналов связи по ВСЕМ BGP-группам конфига:
         группа, IP соседа, описание, группы префиксов import/export и
         приоритет из суффикса -P<n> имён политик.
+
+        priority_groups — группы в порядке убывания приоритета (напр.
+        ("DC-MOSCOW",)): их каналы получают меньший group_rank и стоят
+        выше в списке. Остальные группы — ниже, в порядке конфига.
+        Внутри группы каналы отсортированы по приоритету P1..Pn
+        (без приоритета — в конце группы).
         """
         result: list[BgpChannel] = []
+        group_index: dict[str, int] = {}
         for grp in self.root.iter("group"):
             group_name = self._text(grp, "name")
             if not group_name:
                 continue
+            group_index.setdefault(group_name, len(group_index))
+            if group_name in priority_groups:
+                rank = priority_groups.index(group_name)
+            else:
+                rank = len(priority_groups) + group_index[group_name]
             for nb in grp.findall("neighbor"):
                 imports = [self._el_text(e) for e in nb.findall("import")]
                 exports = [self._el_text(e) for e in nb.findall("export")]
@@ -121,7 +135,10 @@ class BgpPolicySwitcher:
                     imports     = imports,
                     exports     = exports,
                     priority    = _policy_priority(imports, exports),
+                    group_rank  = rank,
                 ))
+        # Сортировка стабильная: приоритетные группы выше, внутри группы — P1..Pn.
+        result.sort(key=lambda c: (c.group_rank, c.priority is None, c.priority or 0))
         return result
 
     def neighbors(self, group: str) -> list[BgpNeighbor]:
