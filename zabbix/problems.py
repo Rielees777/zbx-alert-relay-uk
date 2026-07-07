@@ -8,18 +8,19 @@ from trigger_parser import TriggerInfo
 from zabbix.client import ZabbixClient
 
 _EVENT_OUTPUT = ["eventid", "objectid", "name", "severity", "clock", "r_eventid"]
-_EVENT_KWARGS = dict(source=0, object=0, value=1, sortfield=["clock"], sortorder="DESC")
 
 
 class ZabbixProblems(ZabbixClient):
 
-    def get_active_rpm_problems(
-        self,
-        pattern: str,
-        minutes: int = 5,
-    ) -> list[RpmProblem]:
+    def get_active_rpm_problems(self, pattern: str) -> list[RpmProblem]:
+        """
+        Все ОТКРЫТЫЕ проблемы по паттерну триггера, независимо от их возраста
+        (problem.get отдаёт только нерешённые — окно по времени не нужно,
+        иначе терялись бы старые незакрытые алерты). Слишком молодые
+        (< MIN_ALERT_AGE_SEC) откладываются до следующего цикла.
+        """
         self._ensure_connected()
-        events = self._fetch_events(pattern, minutes)
+        events = self._fetch_open_problem_events(pattern)
         min_age = MIN_ALERT_AGE_SEC
         now = time.time()
         active = [
@@ -142,16 +143,27 @@ class ZabbixProblems(ZabbixClient):
                 return cod
         return None
 
-    def _fetch_events(self, pattern: str, minutes: int) -> list[dict]:
-        params: dict = {
-            **_EVENT_KWARGS,
-            "output":      _EVENT_OUTPUT,
-            "search":      {"name": pattern},
-            "selectHosts": ["hostid", "host", "name"],
-        }
-        if minutes > 0:
-            params["time_from"] = int(time.time()) - minutes * 60
-        return self._zapi.event.get(**params)
+    def _fetch_open_problem_events(self, pattern: str) -> list[dict]:
+        """
+        Текущие открытые проблемы (problem.get) по паттерну имени, затем их
+        события (event.get по eventid) — только у event.get есть selectHosts.
+        """
+        problems = self._zapi.problem.get(
+            output=["eventid"],
+            search={"name": pattern},
+            source=0,
+            object=0,
+        )
+        eventids = [p["eventid"] for p in problems]
+        if not eventids:
+            return []
+        return self._zapi.event.get(
+            output=_EVENT_OUTPUT,
+            eventids=eventids,
+            selectHosts=["hostid", "host", "name"],
+            source=0,
+            object=0,
+        )
 
     def _ip_by_host(self, host_ids: list[str]) -> dict[str, str]:
         if not host_ids:

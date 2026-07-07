@@ -161,11 +161,12 @@ def send_provider_notification(settings, report: IncidentReport) -> bool:
     при успешной отправке. Блокирующая (HTTP) — из asyncio вызывать через
     to_thread."""
     if not settings.mail_enabled:
-        logger.debug("Почта не сконфигурирована (MAIL_SERVICE_URL) — письмо не отправляется.")
+        logger.info("Почта не сконфигурирована (MAIL_SERVICE_URL) — письмо оператору не отправляется (host=%s).",
+                    report.problem.host_name)
         return False
 
     if report.decision not in _MAILABLE_DECISIONS:
-        logger.debug(
+        logger.info(
             "Письмо оператору не требуется для decision=%s (host=%s)",
             report.decision.value if report.decision else None,
             report.problem.host_name,

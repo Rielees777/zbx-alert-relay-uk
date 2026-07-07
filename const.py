@@ -15,7 +15,6 @@ PING_COUNT: int = 100
 L2VPN_LOSS_THRESHOLD_PCT: float = 5.0
 CHANNEL_UTIL_THRESHOLD_PCT: float = 90.0
 UTIL_LOOKBACK_MINUTES: int = 20
-ACTIVE_MINUTES: int = 60
 
 # Интервал расписания проверок и минимальный возраст алерта: реагируем
 # только на триггеры, длящиеся дольше 5 минут; более молодые пропускаются

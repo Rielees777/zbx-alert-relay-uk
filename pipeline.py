@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 from const import (
-    ACTIVE_MINUTES,
     ALLOWED_CHANNEL_TYPES,
     CHANNEL_UTIL_THRESHOLD_PCT,
     L2VPN_LOSS_THRESHOLD_PCT,
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def run(zabbix_api, junos_api, matcher=None, skip_eventids: frozenset[str] = frozenset()) -> list[IncidentReport]:
-    problems = _collect_problems(zabbix_api, ACTIVE_MINUTES, skip_eventids)
+    problems = _collect_problems(zabbix_api, skip_eventids)
     if not problems:
         logger.debug("Активных RPM-проблем для обработки не найдено.")
         return []
@@ -34,13 +33,12 @@ def run(zabbix_api, junos_api, matcher=None, skip_eventids: frozenset[str] = fro
 
 def _collect_problems(
     zabbix_api,
-    active_minutes: int,
-    skip_eventids:  frozenset[str] = frozenset(),
+    skip_eventids: frozenset[str] = frozenset(),
 ) -> list[RpmProblem]:
     seen:   set[str]         = set()
     result: list[RpmProblem] = []
     for pattern in TRIGGER_PATTERNS:
-        for p in zabbix_api.get_active_rpm_problems(pattern=pattern, minutes=active_minutes):
+        for p in zabbix_api.get_active_rpm_problems(pattern=pattern):
             # Site-алерты ("Потери до <площадка>") обрабатываются всегда;
             # канальные — только l2vpn.
             if not p.site_alert and p.channel_type not in ALLOWED_CHANNEL_TYPES:

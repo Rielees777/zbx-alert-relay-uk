@@ -17,7 +17,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pipeline
 from bot import Bot
 from config import Settings
-from const import ACTIVE_MINUTES, CHECK_INTERVAL_MINUTES
+from const import CHECK_INTERVAL_MINUTES
 from emulator import load_emulated_apis
 from junos import JunosApi
 from mailer import send_provider_notification
@@ -35,10 +35,12 @@ from zabbix import ZabbixApi
 # и чат при этом настоящие — сообщения реально уходят получателю. Реестр
 # Pyrus — из файла (ключ "pyrus_sites"), либо, если его там нет, реальный,
 # загруженный при старте. Пусто/None — обычный боевой режим.
-# Готовые случаи: tests/dev_alerts/dev_alerts_1.json … dev_alerts_7.json
+# Готовые случаи: tests/dev_alerts/dev_alerts_1.json … dev_alerts_8.json
 # (1 деградация, 2 перегрузка, 3 обрыв 100%, 4 SSH недоступен,
-#  5 потери IPSEC, 6 ложное срабатывание, 7 игнорируемый inet).
-EMULATOR_FIXTURE: str | None = "tests/dev_alerts/dev_alerts_1.json"
+#  5 потери IPSEC, 6 ложное срабатывание, 7 игнорируемый inet, 8 site-алерт).
+# БОЕВОЙ РЕЖИМ = None. Для локального теста раскомментируйте строку с файлом.
+EMULATOR_FIXTURE: str | None = None
+# EMULATOR_FIXTURE = "tests/dev_alerts/dev_alerts_1.json"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -169,6 +171,13 @@ async def main() -> None:
     if not settings.bot_token:
         logger.error("BOT_TOKEN не задан в .env — уведомления отправляться не будут.")
 
+    if settings.mail_enabled:
+        logger.info("Почта оператору включена: %s (ящик %s, запасной адрес %s)",
+                    settings.mail_service_url, settings.mailbox,
+                    settings.mail_to_default or "не задан")
+    else:
+        logger.warning("MAIL_SERVICE_URL не задан в .env — письма оператору отправляться не будут.")
+
     bot = create_bot(
         token=settings.bot_token,
         api_url=settings.bot_url,
@@ -178,9 +187,11 @@ async def main() -> None:
     # Реестр Pyrus загружается один раз при старте.
     matcher = _build_matcher(settings)
 
-    # Отметки об отработанных инцидентах живут на всё время работы процесса;
-    # TTL с запасом больше окна выборки событий, чтобы реестр не рос вечно.
-    sent = SentRegistry(ttl_sec=ACTIVE_MINUTES * 60 + 600)
+    # Отметки об отработанных инцидентах. eventid Zabbix уникальны и не
+    # переиспользуются, поэтому TTL нужен только как гигиена памяти; он
+    # обязан быть больше жизни самого долгого открытого алерта — иначе
+    # незакрытый инцидент уведомлялся бы повторно после очистки отметки.
+    sent = SentRegistry(ttl_sec=7 * 24 * 3600)
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
