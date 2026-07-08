@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 import time
 
@@ -42,8 +43,13 @@ from zabbix import ZabbixApi
 EMULATOR_FIXTURE: str | None = None
 # EMULATOR_FIXTURE = "tests/dev_alerts/dev_alerts_1.json"
 
+# Уровень логирования: LOG_LEVEL=DEBUG в .env/окружении включает подробный
+# разбор сопоставления Pyrus (matcher/find_channel_by_trigger/_attach_pyrus/
+# _contract) — полезно, когда в сообщении/письме не появляется договор.
+_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, _LOG_LEVEL, logging.INFO),
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -160,6 +166,13 @@ async def check_rpm(
 
 async def main() -> None:
     settings = Settings()
+
+    # LOG_LEVEL мог быть задан в .env (pydantic Settings), а не только как
+    # переменную окружения процесса — basicConfig() при импорте видит только
+    # последнюю. Перевыставляем уровень здесь, чтобы .env тоже работал.
+    effective_level = settings.log_level.upper()
+    logging.getLogger().setLevel(getattr(logging, effective_level, logging.INFO))
+    logger.info("Уровень логирования: %s", effective_level)
 
     if EMULATOR_FIXTURE:
         logger.warning(

@@ -94,7 +94,13 @@ class TriggerInfo:
 
     @staticmethod
     def _normalize(text: str | None) -> str:
-        return " ".join((text or "").split()).casefold()
+        """
+        Сравнение имени площадки нечувствительно к пунктуации и пробелам:
+        "ул. Киевская д. 5" и "ул.Киевская д.5" — один и тот же адрес, но
+        в имени триггера и видимом имени узла оформлены по-разному.
+        Оставляем только буквы/цифры в нижнем регистре.
+        """
+        return "".join(ch for ch in (text or "").casefold() if ch.isalnum())
 
     def matches_visible_name(self, host_name: str | None) -> bool:
         """
@@ -132,7 +138,14 @@ def find_channel_by_trigger(
     иначе канал не сопоставляется вовсе.
     """
     trigger = TriggerInfo(trigger_name)
+    logger.debug(
+        "find_channel_by_trigger: trigger=%r → is_site=%s site_name=%r node=%r "
+        "provider=%r channel_type=%r",
+        trigger_name, trigger.is_site, trigger.site_name,
+        trigger.node, trigger.provider, trigger.channel_type,
+    )
     if not site.channels:
+        logger.debug("find_channel_by_trigger: у задачи task:%d нет каналов", site.task_id)
         return None
 
     # Site-триггер («Потери до <площадка>»): провайдера в имени нет —
@@ -146,10 +159,15 @@ def find_channel_by_trigger(
                 trigger.site_name, host_name,
             )
             return None
+        logger.debug("find_channel_by_trigger: площадка %r совпадает с узлом %r", trigger.site_name, host_name)
         typed = [ch for ch in site.channels
                  if ch.service and "l2vpn" in ch.service.lower()]
         if typed:
             return typed[0]
+        logger.debug(
+            "find_channel_by_trigger: у task:%d нет канала со службой l2vpn (services=%r), каналов=%d",
+            site.task_id, [ch.service for ch in site.channels], len(site.channels),
+        )
         return site.channels[0] if len(site.channels) == 1 else None
 
     matches = list(site.channels)
@@ -161,13 +179,27 @@ def find_channel_by_trigger(
             if normalize_provider(ch.provider) == trigger.provider
         ]
         if not matches:
+            logger.debug(
+                "find_channel_by_trigger: нет канала с провайдером %r (providers=%r)",
+                trigger.provider, [ch.provider for ch in site.channels],
+            )
             return None
 
     # 2. Фильтр по услуге, соответствующей типу канала из триггера.
     if trigger.channel_type:
         want = _TYPE_TO_SERVICE.get(trigger.channel_type, trigger.channel_type)
         typed = [ch for ch in matches if ch.service and want in ch.service.lower()]
+        if not typed:
+            logger.debug(
+                "find_channel_by_trigger: нет канала со службой %r среди %r (после фильтра провайдера)",
+                want, [ch.service for ch in matches],
+            )
         return typed[0] if typed else None
 
     # 3. Тип не распознан — только если канал однозначен.
+    if len(matches) != 1:
+        logger.debug(
+            "find_channel_by_trigger: тип канала не распознан в триггере, каналов после фильтра=%d — неоднозначно",
+            len(matches),
+        )
     return matches[0] if len(matches) == 1 else None

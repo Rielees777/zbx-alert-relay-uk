@@ -55,4 +55,15 @@ class RegistryMatcher:
         Для site-триггеров `host_name` (видимое имя узла того же алерта)
         обязателен — без совпадения с именем площадки канал не отдаётся.
         """
-        return find_channel_by_trigger(trigger_name, site, host_name)
+        logger.debug(
+            "find_channel: task:%d, trigger=%r, host_name=%r, каналов в задаче=%d",
+            site.task_id, trigger_name, host_name, len(site.channels),
+        )
+        channel = find_channel_by_trigger(trigger_name, site, host_name)
+        logger.debug(
+            "find_channel: task:%d → %s",
+            site.task_id,
+            f"provider={channel.provider!r} contract={channel.contract!r} service={channel.service!r}"
+            if channel else "канал не найден",
+        )
+        return channel

@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     token:      str
     verify_ssl: bool = True
 
+    # Уровень логирования (LOG_LEVEL=DEBUG для подробного разбора
+    # сопоставления Pyrus — matcher/find_channel_by_trigger/_contract).
+    log_level: str = Field("INFO", validation_alias=AliasChoices("LOG_LEVEL", "log_level"))
+
     # Pyrus (PYRUS_*)
     pyrus_login:   str = Field("", validation_alias=AliasChoices("PYRUS_LOGIN",   "pyrus_login"))
     pyrus_token:   str = Field("", validation_alias=AliasChoices("PYRUS_TOKEN",   "pyrus_token"))

@@ -136,19 +136,28 @@ def _handle_l2vpn_ok(junos_api, report: IncidentReport) -> None:
 
 def _attach_pyrus(report: IncidentReport, matcher) -> None:
     if not matcher:
+        logger.debug("Pyrus: matcher не задан — договор в сообщении будет «—»")
         return
+    logger.debug("Pyrus: ищу задачу по ip=%r (host=%s)", report.problem.ip, report.problem.host_name)
     site = matcher.find(report.problem.ip)
     if site:
         report.pyrus_site    = site
         report.pyrus_channel = matcher.find_channel(
             site, report.problem.trigger_name, report.problem.host_name,
         )
-        logger.debug("Pyrus matched: host=%s → task:%d channel:%s contract:%s",
-                     report.problem.host_name, site.task_id,
-                     report.pyrus_channel.provider if report.pyrus_channel else None,
-                     report.pyrus_channel.contract if report.pyrus_channel else None)
+        if report.pyrus_channel:
+            logger.debug("Pyrus matched: host=%s → task:%d channel:%s contract:%s",
+                         report.problem.host_name, site.task_id,
+                         report.pyrus_channel.provider, report.pyrus_channel.contract)
+        else:
+            logger.warning(
+                "Pyrus: задача task:%d найдена по ip=%r (host=%s), но канал не сопоставлен "
+                "с триггером %r — договор в сообщении будет «—»",
+                site.task_id, report.problem.ip, report.problem.host_name, report.problem.trigger_name,
+            )
     else:
-        logger.warning("Pyrus: нет совпадения для хоста %s", report.problem.host_name)
+        logger.warning("Pyrus: нет совпадения для хоста %s (ip=%r) — договор в сообщении будет «—»",
+                        report.problem.host_name, report.problem.ip)
 
 def _check_channel_utilization(zabbix_api, problem: RpmProblem) -> float | None:
     return zabbix_api.get_channel_utilization_pct(

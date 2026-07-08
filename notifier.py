@@ -29,9 +29,19 @@ def _contract(report: IncidentReport, cod) -> str:
     """Номер договора: сначала из канала Pyrus, затем из COD, иначе прочерк."""
     channel = report.pyrus_channel
     if channel and channel.contract:
+        logger.debug("Договор для host=%s: %r (из канала Pyrus)",
+                      report.problem.host_name, channel.contract)
         return channel.contract
     if cod and cod.contract:
+        logger.debug("Договор для host=%s: %r (из COD %s)",
+                      report.problem.host_name, cod.contract, cod.name)
         return cod.contract
+    logger.debug(
+        "Договор для host=%s не определён (pyrus_channel=%s, cod=%s) — «—»",
+        report.problem.host_name,
+        "найден без договора" if channel else "не сопоставлен",
+        cod.name if cod else None,
+    )
     return "—"
 
 
