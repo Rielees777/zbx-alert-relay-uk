@@ -16,7 +16,6 @@ Settings.mail_to_default. Если ни того, ни другого — пис
 
 from __future__ import annotations
 
-import html
 import logging
 
 import requests
@@ -26,12 +25,6 @@ from models import IncidentDecision, IncidentReport
 from notifier import _avg_loss_pct, _contract, _operator
 
 logger = logging.getLogger(__name__)
-
-
-def _esc(value) -> str:
-    """Экранирует значение для вставки в HTML-тело письма (адрес, договор
-    и т.п. приходят из Pyrus/Zabbix и могут содержать '&', '<', '>')."""
-    return html.escape(str(value)) if value is not None else ""
 
 
 def _address(report: IncidentReport) -> str:
@@ -49,8 +42,13 @@ def _service(report: IncidentReport) -> str:
 
 
 def build_provider_email(report: IncidentReport) -> tuple[str, str]:
-    """(subject, body) письма оператору по шаблону обращения. Тело — HTML
-    (без переносов строк письмо в почтовом клиенте читалось одним абзацем)."""
+    """(subject, body) письма оператору по шаблону обращения.
+
+    mail-service показывает тело как обычный текст (HTML-теги в нём
+    выводятся буквально, не рендерятся) — тело обычный текст, строки
+    разделены CRLF (\\r\\n, канонический перевод строки для email-тела
+    по RFC 5322, в отличие от голого \\n).
+    """
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
@@ -59,9 +57,9 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
     service  = _service(report)
 
     if report.decision == IncidentDecision.CHANNEL_DOWN:
-        loss_line = "Потери ICMP: 100% (канал недоступен)"
+        loss_line = "        - Потери ICMP: 100% (канал недоступен)"
     else:
-        loss_line = f"Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
+        loss_line = f"        - Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
 
     util = report.utilization_pct
     util_line = (
@@ -71,15 +69,14 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
     )
 
     subject = f"Проблема на канале связи {service}: {address}"
-    body = (
-        f"<p>Здравствуйте! Наблюдаются проблема по адресу: {_esc(address)}. "
-        f"Услуга {_esc(service)}.<br>"
-        f"Договор: {_esc(contract)}</p>"
-        f"<p>Результаты проверки L2VPN-транспорта:<br>"
-        f"&nbsp;&nbsp;&nbsp;&nbsp;- {_esc(loss_line)}</p>"
-        f"<p>{_esc(util_line)}</p>"
-        f"<p>Просим взять в работу.</p>"
-    )
+    body = "\r\n".join([
+        f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
+        f"Договор: {contract}",
+        f"Результаты проверки L2VPN-транспорта:",
+        loss_line,
+        util_line,
+        "Просим взять в работу.",
+    ])
     return subject, body
 
 
@@ -90,7 +87,7 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
-    """(subject, body) письма оператору для site-алерта. Тело — HTML."""
+    """(subject, body) письма оператору для site-алерта. Обычный текст, CRLF."""
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
@@ -99,9 +96,9 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
     service  = _service(report)
 
     if report.decision == IncidentDecision.CHANNEL_DOWN:
-        loss_line = "Потери ICMP: 100% (канал недоступен)"
+        loss_line = "        - Потери ICMP: 100% (канал недоступен)"
     else:
-        loss_line = f"Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
+        loss_line = f"        - Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
 
     util = report.utilization_pct
     util_line = (
@@ -111,15 +108,14 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
     )
 
     subject = f"Проблема на канале связи {service}: {address}"
-    body = (
-        f"<p>Здравствуйте! Наблюдаются проблема по адресу: {_esc(address)}. "
-        f"Услуга {_esc(service)}.<br>"
-        f"Договор: {_esc(contract)}</p>"
-        f"<p>Результаты проверки L2VPN-транспорта:<br>"
-        f"&nbsp;&nbsp;&nbsp;&nbsp;- {_esc(loss_line)}</p>"
-        f"<p>{_esc(util_line)}</p>"
-        f"<p>Просим взять в работу.</p>"
-    )
+    body = "\r\n".join([
+        f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
+        f"Договор: {contract}",
+        f"Результаты проверки L2VPN-транспорта:",
+        loss_line,
+        util_line,
+        "Просим взять в работу.",
+    ])
     return subject, body
 
 
