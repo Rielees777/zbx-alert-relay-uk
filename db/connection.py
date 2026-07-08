@@ -15,4 +15,8 @@ def get_connection(settings: Settings) -> PGConnection:
         port=settings.db_port,
         application_name="zbx-alert-relay-uk",
         connect_timeout=10,
+        # pyrus_sites живёт в схеме settings.db_schema (registry-pyrus-tasks
+        # создаёт её через DB_SCHEMA) — тот же search_path, чтобы безсхемный
+        # SELECT в load_sites() резолвился туда же, а не в public.
+        options=f"-c search_path={settings.db_schema}",
     )

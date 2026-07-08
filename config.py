@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     db_name: str = Field(
         "devnetops_oass_database", validation_alias=AliasChoices("DB_NAME", "db_name"),
     )
+    # Схема, в которой registry-pyrus-tasks держит pyrus_sites (та же
+    # DB_SCHEMA, что и в его .env; по умолчанию public).
+    db_schema:   str = Field("public", validation_alias=AliasChoices("DB_SCHEMA",   "db_schema"))
     db_user:     str = Field("", validation_alias=AliasChoices("DB_USER",     "db_user"))
     db_password: str = Field("", validation_alias=AliasChoices("DB_PASSWORD", "db_password"))
 
