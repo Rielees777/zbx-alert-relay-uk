@@ -140,7 +140,9 @@ def _attach_pyrus(report: IncidentReport, matcher) -> None:
     site = matcher.find(report.problem.ip)
     if site:
         report.pyrus_site    = site
-        report.pyrus_channel = matcher.find_channel(site, report.problem.trigger_name)
+        report.pyrus_channel = matcher.find_channel(
+            site, report.problem.trigger_name, report.problem.host_name,
+        )
         logger.debug("Pyrus matched: host=%s → task:%d channel:%s contract:%s",
                      report.problem.host_name, site.task_id,
                      report.pyrus_channel.provider if report.pyrus_channel else None,

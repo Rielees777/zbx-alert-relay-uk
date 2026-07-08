@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import re
 
 from models import ChannelInfo, PyrusSite
 from providers import normalize_provider
+
+logger = logging.getLogger(__name__)
 
 # Типы канала в имени триггера (а не провайдеры). "inet" — трафик через
 # интернет по белым IP (без выделенного L2VPN и без конкретного оператора).
@@ -19,12 +22,9 @@ _LOSS_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*%')
 
 # Site-триггер: "Потери до <видимое имя узла>", напр.
 # "Потери до Санкт-Петербург, ул. Киевская д. 5, корп. 4".
-# Якорь начала строки отличает его от "RPM потери до <канал>".
-# Возможный хвост " - NN %" отрезается от имени площадки.
-_SITE_RE = re.compile(
-    r'^\s*Потери\s+до\s+(?P<site>.+?)(?:\s*-\s*\d+(?:[.,]\d+)?\s*%\s*)?$',
-    re.IGNORECASE,
-)
+# Префикс без "RPM" впереди отличает его от канального "RPM потери до <канал>".
+_SITE_PREFIX = "потери до"
+_CHANNEL_PREFIX = "rpm потери до"
 
 
 class TriggerInfo:
@@ -42,10 +42,12 @@ class TriggerInfo:
         self.is_site:      bool         = False  # триггер вида "Потери до <площадка>"
         self.site_name:    str | None   = None   # имя площадки (= видимое имя узла)
 
-        m_site = _SITE_RE.match(raw)
-        if m_site:
+        raw_stripped = raw.strip()
+        casefolded   = raw_stripped.casefold()
+        if casefolded.startswith(_SITE_PREFIX) and not casefolded.startswith(_CHANNEL_PREFIX):
             self.is_site   = True
-            self.site_name = m_site.group("site").strip()
+            tail           = raw_stripped[len(_SITE_PREFIX):].strip()
+            self.site_name = self._strip_loss_suffix(tail)
         else:
             m = _SPEC_RE.search(raw)
             if m:
@@ -74,10 +76,44 @@ class TriggerInfo:
             f"channel_type={self.channel_type!r})"
         )
 
+    @staticmethod
+    def _strip_loss_suffix(text: str) -> str:
+        """Отрезает необязательный хвост "- NN %" от конца строки триггера
+        (без регулярных выражений) — то, что осталось, это имя площадки."""
+        text = text.strip()
+        if not text.endswith("%"):
+            return text
+        idx = text.rfind("-")
+        if idx == -1:
+            return text
+        number_part = text[idx + 1:-1].strip().replace(",", ".")
+        integer_part, _, fractional_part = number_part.partition(".")
+        if integer_part.isdigit() and (fractional_part == "" or fractional_part.isdigit()):
+            return text[:idx].strip()
+        return text
+
+    @staticmethod
+    def _normalize(text: str | None) -> str:
+        return " ".join((text or "").split()).casefold()
+
+    def matches_visible_name(self, host_name: str | None) -> bool:
+        """
+        Site-триггер ("Потери до <площадка>") обязан указывать то же имя,
+        что и видимое имя узла Zabbix в том же алерте. Несовпадение
+        означает, что триггер, вероятно, относится не к этому хосту —
+        такой алерт обрабатывать нельзя.
+
+        Для канальных триггеров сравнение не применяется (всегда True).
+        """
+        if not self.is_site:
+            return True
+        return self._normalize(self.site_name) == self._normalize(host_name)
+
 
 def find_channel_by_trigger(
     trigger_name: str,
     site: PyrusSite,
+    host_name: str | None = None,
 ) -> ChannelInfo | None:
     """
     По имени триггера находит нужный канал в задаче Pyrus.
@@ -90,6 +126,10 @@ def find_channel_by_trigger(
          l2vpn → «L2VPN», inet → «Интернет». Берём канал с этой услугой.
       3. Если тип не указан — подставляем договор только при единственном
          подходящем канале (иначе выбор неоднозначен).
+
+    Для site-триггеров дополнительно требуется совпадение имени площадки
+    из триггера с видимым именем узла того же алерта (`host_name`) —
+    иначе канал не сопоставляется вовсе.
     """
     trigger = TriggerInfo(trigger_name)
     if not site.channels:
@@ -99,6 +139,13 @@ def find_channel_by_trigger(
     # берём l2vpn-канал площадки (как и для канальных алертов, обрабатываем
     # только L2VPN).
     if trigger.is_site:
+        if not trigger.matches_visible_name(host_name):
+            logger.warning(
+                "Площадка из триггера %r не совпадает с видимым именем узла %r — "
+                "канал Pyrus не сопоставляется",
+                trigger.site_name, host_name,
+            )
+            return None
         typed = [ch for ch in site.channels
                  if ch.service and "l2vpn" in ch.service.lower()]
         if typed:

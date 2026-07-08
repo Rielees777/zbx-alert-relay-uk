@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import time
 
 from const import COD, CODs, MIN_ALERT_AGE_SEC
 from models import RpmProblem
 from trigger_parser import TriggerInfo
 from zabbix.client import ZabbixClient
+
+logger = logging.getLogger(__name__)
 
 _EVENT_OUTPUT = ["eventid", "objectid", "name", "severity", "clock", "r_eventid"]
 
@@ -51,9 +54,24 @@ class ZabbixProblems(ZabbixClient):
 
         result: list[RpmProblem] = []
         for h in event.get("hosts", []):
+            host_name = h.get("name") or h.get("host", "")
+
+            # Site-триггер обязан указывать то же имя площадки, что и
+            # видимое имя узла в том же алерте. Несовпадение — признак
+            # того, что триггер срабатывает не по своему хосту; такие
+            # алерты не обрабатываем вовсе (уже прилетали некорректные
+            # сообщения по чужим площадкам).
+            if trigger.is_site and not trigger.matches_visible_name(host_name):
+                logger.warning(
+                    "Site-триггер %r (площадка %r) не совпадает с видимым "
+                    "именем узла %r — алерт пропущен",
+                    trigger_name, trigger.site_name, host_name,
+                )
+                continue
+
             result.append(RpmProblem(
                 eventid=event["eventid"],
-                host_name=h.get("name") or h.get("host", ""),
+                host_name=host_name,
                 host_tech=h.get("host", ""),
                 ip=ip_by_host.get(h["hostid"], ""),
                 cod_name=cod.name if cod else None,

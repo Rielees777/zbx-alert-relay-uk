@@ -43,9 +43,16 @@ class RegistryMatcher:
         logger.debug("Pyrus: нет совпадения для ip=%r", ip)
         return None
 
-    def find_channel(self, site: PyrusSite, trigger_name: str) -> ChannelInfo | None:
+    def find_channel(
+        self,
+        site: PyrusSite,
+        trigger_name: str,
+        host_name: str | None = None,
+    ) -> ChannelInfo | None:
         """
         Находит нужный канал Pyrus по полному имени триггера Zabbix.
         Нормализует провайдер из триггера и сравнивает с каналами задачи.
+        Для site-триггеров `host_name` (видимое имя узла того же алерта)
+        обязателен — без совпадения с именем площадки канал не отдаётся.
         """
-        return find_channel_by_trigger(trigger_name, site)
+        return find_channel_by_trigger(trigger_name, site, host_name)
