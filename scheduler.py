@@ -19,13 +19,13 @@ import pipeline
 from bot import Bot
 from config import Settings
 from const import CHECK_INTERVAL_MINUTES
+from db import get_session, load_sites
 from emulator import load_emulated_apis
 from junos import JunosApi
 from mailer import send_provider_notification
 from matcher import RegistryMatcher
 from models import IncidentReport
 from notifier import build_notification, create_bot, send_notification
-from pyrus import PyrusClient, PyrusSiteParser
 from report import print_incident_reports
 from zabbix import ZabbixApi
 
@@ -86,22 +86,16 @@ class SentRegistry:
 
 
 def _build_matcher(settings: Settings) -> RegistryMatcher | None:
-    """Загружает реестр каналов связи из Pyrus и строит matcher по IP."""
-    if not (settings.pyrus_login and settings.pyrus_token and settings.pyrus_form_id):
-        logger.warning(
-            "Pyrus не сконфигурирован (PYRUS_LOGIN/PYRUS_TOKEN/PYRUS_FORM_ID) — "
-            "сопоставление задач отключено, договор в сообщениях будет «—».",
-        )
-        return None
+    """Загружает реестр каналов связи Pyrus из PostgreSQL (наполняется
+    отдельным проектом registry-pyrus-tasks) и строит matcher по IP."""
     try:
-        client = PyrusClient()
-        tasks  = client.get_registry(settings.pyrus_form_id, settings.pyrus_login, settings.pyrus_token)
-        sites  = PyrusSiteParser.parse_many(tasks)
+        with get_session(settings.db_dsn) as session:
+            sites = load_sites(session)
         matcher = RegistryMatcher(sites)
-        logger.info("Реестр Pyrus загружен: %d задач", len(sites))
+        logger.info("Реестр Pyrus загружен из БД: %d задач", len(sites))
         return matcher
     except Exception as exc:
-        logger.error("Не удалось загрузить реестр Pyrus: %s", exc)
+        logger.error("Не удалось загрузить реестр Pyrus из БД (DB_*): %s", exc)
         return None
 
 
