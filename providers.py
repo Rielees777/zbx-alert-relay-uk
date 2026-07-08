@@ -35,6 +35,10 @@ PROVIDER_ALIASES: dict[str, str] = {
     "megacom":               "МегаКом",
     "мегаком":               "МегаКом",
     "мегаком-ит":            "МегаКом",
+
+    # Обит
+    "obit":                  "Обит",
+    "обит":                  "Обит",
 }
 
 
@@ -59,5 +63,11 @@ def normalize_provider(raw: str | None) -> str | None:
         if alias in key:
             return canonical
 
-    logger.debug("Неизвестный провайдер: %r — добавьте в PROVIDER_ALIASES", raw)
+    logger.warning(
+        "Неизвестный провайдер: %r — нет алиаса в PROVIDER_ALIASES (providers.py). "
+        "Если это реальный провайдер из триггера/Pyrus, из-за разного написания "
+        "(латиница/кириллица, транслитерация) канал не сматчится и договор не найдётся — "
+        "добавьте пару 'слаг из триггера': 'каноническое имя из Pyrus'.",
+        raw,
+    )
     return raw.strip()
