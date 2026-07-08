@@ -16,6 +16,7 @@ Settings.mail_to_default. Если ни того, ни другого — пис
 
 from __future__ import annotations
 
+import html
 import logging
 
 import requests
@@ -25,6 +26,12 @@ from models import IncidentDecision, IncidentReport
 from notifier import _avg_loss_pct, _contract, _operator
 
 logger = logging.getLogger(__name__)
+
+
+def _esc(value) -> str:
+    """Экранирует значение для вставки в HTML-тело письма (адрес, договор
+    и т.п. приходят из Pyrus/Zabbix и могут содержать '&', '<', '>')."""
+    return html.escape(str(value)) if value is not None else ""
 
 
 def _address(report: IncidentReport) -> str:
@@ -42,7 +49,8 @@ def _service(report: IncidentReport) -> str:
 
 
 def build_provider_email(report: IncidentReport) -> tuple[str, str]:
-    """(subject, body) письма оператору по шаблону обращения."""
+    """(subject, body) письма оператору по шаблону обращения. Тело — HTML
+    (без переносов строк письмо в почтовом клиенте читалось одним абзацем)."""
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
@@ -51,9 +59,9 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
     service  = _service(report)
 
     if report.decision == IncidentDecision.CHANNEL_DOWN:
-        loss_line = "        - Потери ICMP: 100% (канал недоступен)"
+        loss_line = "Потери ICMP: 100% (канал недоступен)"
     else:
-        loss_line = f"        - Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
+        loss_line = f"Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
 
     util = report.utilization_pct
     util_line = (
@@ -64,12 +72,13 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
 
     subject = f"Проблема на канале связи {service}: {address}"
     body = (
-        f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.\n"
-        f"Договор: {contract}\n"
-        f"Результаты проверки L2VPN-транспорта:\n"
-        f"{loss_line}\n"
-        f"{util_line}\n"
-        f"Просим взять в работу."
+        f"<p>Здравствуйте! Наблюдаются проблема по адресу: {_esc(address)}. "
+        f"Услуга {_esc(service)}.<br>"
+        f"Договор: {_esc(contract)}</p>"
+        f"<p>Результаты проверки L2VPN-транспорта:<br>"
+        f"&nbsp;&nbsp;&nbsp;&nbsp;- {_esc(loss_line)}</p>"
+        f"<p>{_esc(util_line)}</p>"
+        f"<p>Просим взять в работу.</p>"
     )
     return subject, body
 
@@ -81,7 +90,7 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
-    """(subject, body) письма оператору для site-алерта."""
+    """(subject, body) письма оператору для site-алерта. Тело — HTML."""
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
@@ -90,9 +99,9 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
     service  = _service(report)
 
     if report.decision == IncidentDecision.CHANNEL_DOWN:
-        loss_line = "        - Потери ICMP: 100% (канал недоступен)"
+        loss_line = "Потери ICMP: 100% (канал недоступен)"
     else:
-        loss_line = f"        - Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
+        loss_line = f"Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
 
     util = report.utilization_pct
     util_line = (
@@ -103,12 +112,13 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
 
     subject = f"Проблема на канале связи {service}: {address}"
     body = (
-        f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.\n"
-        f"Договор: {contract}\n"
-        f"Результаты проверки L2VPN-транспорта:\n"
-        f"{loss_line}\n"
-        f"{util_line}\n"
-        f"Просим взять в работу."
+        f"<p>Здравствуйте! Наблюдаются проблема по адресу: {_esc(address)}. "
+        f"Услуга {_esc(service)}.<br>"
+        f"Договор: {_esc(contract)}</p>"
+        f"<p>Результаты проверки L2VPN-транспорта:<br>"
+        f"&nbsp;&nbsp;&nbsp;&nbsp;- {_esc(loss_line)}</p>"
+        f"<p>{_esc(util_line)}</p>"
+        f"<p>Просим взять в работу.</p>"
     )
     return subject, body
 
