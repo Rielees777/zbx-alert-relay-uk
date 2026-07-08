@@ -24,14 +24,18 @@ class Settings(BaseSettings):
     # сопоставления Pyrus — matcher/find_channel_by_trigger/_contract).
     log_level: str = Field("INFO", validation_alias=AliasChoices("LOG_LEVEL", "log_level"))
 
-    # Реестр каналов связи Pyrus читается из PostgreSQL (DB_*), которую
-    # наполняет отдельный проект registry-pyrus-tasks — сам к Pyrus API
-    # этот сервис больше не ходит.
-    db_host:     str  = Field("localhost",     validation_alias=AliasChoices("DB_HOST",     "db_host"))
-    db_port:     int  = Field(5432,            validation_alias=AliasChoices("DB_PORT",     "db_port"))
-    db_name:     str  = Field("pyrus_registry", validation_alias=AliasChoices("DB_NAME",    "db_name"))
-    db_user:     str  = Field("postgres",      validation_alias=AliasChoices("DB_USER",     "db_user"))
-    db_password: str  = Field("",              validation_alias=AliasChoices("DB_PASSWORD", "db_password"))
+    # Реестр каналов связи Pyrus читается из таблицы pyrus_sites в готовой
+    # БД devnetops_oass_database (DB_*), которую наполняет отдельный проект
+    # registry-pyrus-tasks — сам к Pyrus API этот сервис больше не ходит.
+    db_host: str = Field(
+        "float-dbass-db1.sovcombank.group", validation_alias=AliasChoices("DB_HOST", "db_host"),
+    )
+    db_port: int = Field(5432, validation_alias=AliasChoices("DB_PORT", "db_port"))
+    db_name: str = Field(
+        "devnetops_oass_database", validation_alias=AliasChoices("DB_NAME", "db_name"),
+    )
+    db_user:     str = Field("", validation_alias=AliasChoices("DB_USER",     "db_user"))
+    db_password: str = Field("", validation_alias=AliasChoices("DB_PASSWORD", "db_password"))
 
     # Juniper / PyEZ (JUNOS_*)
     junos_user:     str = Field("",  validation_alias=AliasChoices("JUNOS_USER",     "junos_user"))
@@ -55,13 +59,6 @@ class Settings(BaseSettings):
     @property
     def mail_enabled(self) -> bool:
         return bool(self.mail_service_url)
-
-    @property
-    def db_dsn(self) -> str:
-        return (
-            f"postgresql+psycopg2://{self.db_user}:{self.db_password}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}"
-        )
 
     def zabbix_config(self) -> ZabbixConfig:
         return ZabbixConfig(

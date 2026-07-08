@@ -1,28 +1,18 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from functools import lru_cache
-from typing import Iterator
+import psycopg2
+from psycopg2.extensions import connection as PGConnection
 
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
+from config import Settings
 
 
-@lru_cache
-def get_engine(dsn: str) -> Engine:
-    return create_engine(dsn, pool_pre_ping=True)
-
-
-@lru_cache
-def _session_factory(dsn: str) -> sessionmaker[Session]:
-    return sessionmaker(bind=get_engine(dsn), expire_on_commit=False)
-
-
-@contextmanager
-def get_session(dsn: str) -> Iterator[Session]:
-    session = _session_factory(dsn)()
-    try:
-        yield session
-    finally:
-        session.close()
+def get_connection(settings: Settings) -> PGConnection:
+    return psycopg2.connect(
+        user=settings.db_user,
+        password=settings.db_password,
+        host=settings.db_host,
+        dbname=settings.db_name,
+        port=settings.db_port,
+        application_name="zbx-alert-relay-uk",
+        connect_timeout=10,
+    )

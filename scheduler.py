@@ -19,7 +19,7 @@ import pipeline
 from bot import Bot
 from config import Settings
 from const import CHECK_INTERVAL_MINUTES
-from db import get_session, load_sites
+from db import get_connection, load_sites
 from emulator import load_emulated_apis
 from junos import JunosApi
 from mailer import send_provider_notification
@@ -89,8 +89,11 @@ def _build_matcher(settings: Settings) -> RegistryMatcher | None:
     """Загружает реестр каналов связи Pyrus из PostgreSQL (наполняется
     отдельным проектом registry-pyrus-tasks) и строит matcher по IP."""
     try:
-        with get_session(settings.db_dsn) as session:
-            sites = load_sites(session)
+        conn = get_connection(settings)
+        try:
+            sites = load_sites(conn)
+        finally:
+            conn.close()
         matcher = RegistryMatcher(sites)
         logger.info("Реестр Pyrus загружен из БД: %d задач", len(sites))
         return matcher

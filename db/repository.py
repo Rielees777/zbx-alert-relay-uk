@@ -1,40 +1,33 @@
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from psycopg2.extensions import connection as PGConnection
 
-from db.models import PyrusSiteRow
 from models import ChannelInfo, PyrusSite
 
+_SELECT_SQL = """
+SELECT task_id, directorate, zabbix_hostname, router_ip, address, address_source, city, channels
+FROM pyrus_sites
+"""
 
-def load_sites(session: Session) -> list[PyrusSite]:
-    """Читает реестр каналов связи Pyrus из БД (наполняется registry-pyrus-tasks)
-    и возвращает его в виде тех же моделей данных, что раньше отдавал PyrusSiteParser."""
-    rows = session.scalars(
-        select(PyrusSiteRow).options(selectinload(PyrusSiteRow.channels)),
-    ).all()
+
+def load_sites(conn: PGConnection) -> list[PyrusSite]:
+    """Читает реестр каналов связи Pyrus из таблицы pyrus_sites (наполняется
+    проектом registry-pyrus-tasks) и возвращает его в виде тех же моделей
+    данных, что раньше отдавал PyrusSiteParser."""
+    with conn.cursor() as cur:
+        cur.execute(_SELECT_SQL)
+        rows = cur.fetchall()
 
     return [
         PyrusSite(
-            task_id=row.task_id,
-            directorate=row.directorate,
-            zabbix_hostname=row.zabbix_hostname,
-            router_ip=row.router_ip,
-            address=row.address,
-            address_source=row.address_source,
-            city=row.city,
-            channels=[
-                ChannelInfo(
-                    provider=ch.provider,
-                    channel_id=ch.channel_id,
-                    bandwidth=ch.bandwidth,
-                    contract=ch.contract,
-                    ip_address=ch.ip_address,
-                    service=ch.service,
-                    technology=ch.technology,
-                )
-                for ch in row.channels
-            ],
+            task_id=task_id,
+            directorate=directorate,
+            zabbix_hostname=zabbix_hostname,
+            router_ip=router_ip,
+            address=address,
+            address_source=address_source,
+            city=city,
+            channels=[ChannelInfo(**ch) for ch in (channels or [])],
         )
-        for row in rows
+        for task_id, directorate, zabbix_hostname, router_ip, address, address_source, city, channels in rows
     ]

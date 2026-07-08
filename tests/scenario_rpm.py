@@ -202,10 +202,13 @@ def _pyrus_matcher_real(settings):
     Возвращает (matcher, sites, raw_tasks) — raw_tasks пуст (сырых задач Pyrus
     здесь больше нет, реестр приходит уже разобранным моделями данных)."""
     from matcher import RegistryMatcher
-    from db import get_session, load_sites
+    from db import get_connection, load_sites
 
-    with get_session(settings.db_dsn) as session:
-        sites = load_sites(session)
+    conn = get_connection(settings)
+    try:
+        sites = load_sites(conn)
+    finally:
+        conn.close()
     return RegistryMatcher(sites), sites, []
 
 
