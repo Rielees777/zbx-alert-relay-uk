@@ -56,27 +56,31 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
     address  = _address(report)
     service  = _service(report)
 
-    if report.decision == IncidentDecision.CHANNEL_DOWN:
+    channel_down = report.decision == IncidentDecision.CHANNEL_DOWN
+    if channel_down:
         loss_line = "        - Потери ICMP: 100% (канал недоступен)"
     else:
         loss_line = f"        - Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
 
-    util = report.utilization_pct
-    util_line = (
-        f"Утилизация канала в пике за период инцидента: {util:.0f}%"
-        if util is not None
-        else "Утилизация канала в пике за период инцидента: данные недоступны"
-    )
-
-    subject = f"Проблема на канале связи {service}: {address}"
-    body = "\r\n".join([
+    lines = [
         f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
         f"Договор: {contract}",
         f"Результаты проверки L2VPN-транспорта:",
         loss_line,
-        util_line,
-        "Просим взять в работу.",
-    ])
+    ]
+    # Канал полностью недоступен — утилизация тут ни при чём (нечего мерить),
+    # строку с ней не добавляем.
+    if not channel_down:
+        util = report.utilization_pct
+        lines.append(
+            f"Утилизация канала в пике за период инцидента: {util:.0f}%"
+            if util is not None
+            else "Утилизация канала в пике за период инцидента: данные недоступны"
+        )
+    lines.append("Просим взять в работу.")
+
+    subject = f"Проблема на канале связи {service}: {address}"
+    body = "\r\n".join(lines)
     return subject, body
 
 
@@ -95,27 +99,29 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
     address  = _address(report)
     service  = _service(report)
 
-    if report.decision == IncidentDecision.CHANNEL_DOWN:
+    channel_down = report.decision == IncidentDecision.CHANNEL_DOWN
+    if channel_down:
         loss_line = "        - Потери ICMP: 100% (канал недоступен)"
     else:
         loss_line = f"        - Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
 
-    util = report.utilization_pct
-    util_line = (
-        f"Утилизация канала в пике за период инцидента: {util:.0f}%"
-        if util is not None
-        else "Утилизация канала в пике за период инцидента: данные недоступны"
-    )
-
-    subject = f"Проблема на канале связи {service}: {address}"
-    body = "\r\n".join([
+    lines = [
         f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
         f"Договор: {contract}",
         f"Результаты проверки L2VPN-транспорта:",
         loss_line,
-        util_line,
-        "Просим взять в работу.",
-    ])
+    ]
+    if not channel_down:
+        util = report.utilization_pct
+        lines.append(
+            f"Утилизация канала в пике за период инцидента: {util:.0f}%"
+            if util is not None
+            else "Утилизация канала в пике за период инцидента: данные недоступны"
+        )
+    lines.append("Просим взять в работу.")
+
+    subject = f"Проблема на канале связи {service}: {address}"
+    body = "\r\n".join(lines)
     return subject, body
 
 
