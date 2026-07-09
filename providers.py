@@ -5,6 +5,21 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# Ячейка email техподдержки провайдера в Pyrus (ChannelInfo.email, cell 52)
+# нередко содержит ещё и телефон вперемешку (через запятую/перенос строки/
+# пробел) — вытаскиваем только email.
+_EMAIL_RE = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')
+
+
+def extract_email(text: str | None) -> str | None:
+    """Первый email из свободнотекстовой ячейки (ChannelInfo.email) — там
+    кроме email нередко указан ещё и телефон."""
+    if not text:
+        return None
+    m = _EMAIL_RE.search(text)
+    return m.group(0) if m else None
+
+
 PROVIDER_ALIASES: dict[str, str] = {
     # МТС
     "mts":                   "МТС",

@@ -58,10 +58,16 @@ class Settings(BaseSettings):
     mail_verify_ssl:  bool = Field(True,        validation_alias=AliasChoices("MAIL_VERIFY_SSL",  "mail_verify_ssl"))
     # Запасной адрес получателя, если провайдер не найден в PROVIDER_EMAILS.
     mail_to_default:  str = Field("",           validation_alias=AliasChoices("MAIL_TO_DEFAULT",  "mail_to_default"))
+    # Адреса копии письма оператору, через запятую (необязательно).
+    mail_cc:          str = Field("",           validation_alias=AliasChoices("MAIL_CC",          "mail_cc"))
 
     @property
     def mail_enabled(self) -> bool:
         return bool(self.mail_service_url)
+
+    @property
+    def mail_cc_list(self) -> list[str]:
+        return [addr.strip() for addr in self.mail_cc.split(",") if addr.strip()]
 
     def zabbix_config(self) -> ZabbixConfig:
         return ZabbixConfig(

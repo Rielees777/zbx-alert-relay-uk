@@ -23,6 +23,7 @@ import requests
 from const import get_cod_by_name, get_provider_email
 from models import IncidentDecision, IncidentReport
 from notifier import _avg_loss_pct, _contract, _operator
+from providers import extract_email
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +126,32 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
     return subject, body
 
 
-def resolve_recipient(report: IncidentReport, settings) -> str | None:
-    """Email оператора: по провайдеру из канала Pyrus, иначе запасной адрес."""
+def channel_email(report: IncidentReport) -> str | None:
+    """
+    Email провайдера из сматченного канала Pyrus (ChannelInfo.email, cell 52
+    — свободный текст, в нём кроме email нередко указан ещё и телефон,
+    извлекаем только email).
+
+    Пока нигде не подключён автоматически — используется, только если
+    явно передан вызывающим кодом как `to_override` в resolve_recipient/
+    send_provider_notification (см. их docstring).
+    """
+    ch = report.pyrus_channel
+    return extract_email(ch.email) if ch else None
+
+
+def resolve_recipient(
+    report: IncidentReport,
+    settings,
+    to_override: str | None = None,
+) -> str | None:
+    """
+    Email оператора: `to_override` (если передан явно вызывающим кодом —
+    например, channel_email(report)) → PROVIDER_EMAILS[провайдер] →
+    запасной адрес Settings.mail_to_default.
+    """
+    if to_override:
+        return to_override
     cod = get_cod_by_name(report.problem.cod_name)
     operator = _operator(report, cod)
     return get_provider_email(operator) or (settings.mail_to_default or None)
@@ -145,13 +170,15 @@ class MailClient:
             "Accept":       "application/json",
         })
 
-    def send(self, to_addr: str, subject: str, body: str) -> str:
+    def send(self, to_addr: str, subject: str, body: str, cc_addrs: list[str] | None = None) -> str:
         url = f"{self._base_url}/emails/{self._mailbox}/send"
         payload = {
             "to_recipients": [to_addr],
             "subject":       subject,
             "body":          body,
         }
+        if cc_addrs:
+            payload["cc_recipients"] = cc_addrs
         resp = self._session.post(url, json=payload, timeout=30)
         resp.raise_for_status()
         try:
@@ -168,10 +195,25 @@ _MAILABLE_DECISIONS = frozenset({
 })
 
 
-def send_provider_notification(settings, report: IncidentReport) -> bool:
-    """Формирует и шлёт письмо оператору через mail-service. Возвращает True
+def send_provider_notification(
+    settings,
+    report: IncidentReport,
+    to_override: str | None = None,
+) -> bool:
+    """
+    Формирует и шлёт письмо оператору через mail-service. Возвращает True
     при успешной отправке. Блокирующая (HTTP) — из asyncio вызывать через
-    to_thread."""
+    to_thread.
+
+    `to_override` — необязательный явный адрес получателя (например,
+    channel_email(report) — email из канала Pyrus), приоритетнее
+    PROVIDER_EMAILS/MAIL_TO_DEFAULT. Сейчас нигде не передаётся — сама
+    возможность отправки готова, включать как источник получателя по
+    умолчанию пока не нужно.
+
+    Копия письма — Settings.mail_cc_list (MAIL_CC в .env, через запятую),
+    если задана.
+    """
     if not settings.mail_enabled:
         logger.info("Почта не сконфигурирована (MAIL_SERVICE_URL) — письмо оператору не отправляется (host=%s).",
                     report.problem.host_name)
@@ -185,7 +227,7 @@ def send_provider_notification(settings, report: IncidentReport) -> bool:
         )
         return False
 
-    to_addr = resolve_recipient(report, settings)
+    to_addr = resolve_recipient(report, settings, to_override=to_override)
     if not to_addr:
         logger.warning(
             "Email оператора не определён (нет в PROVIDER_EMAILS и не задан "
@@ -199,9 +241,9 @@ def send_provider_notification(settings, report: IncidentReport) -> bool:
     else:
         subject, body = build_provider_email(report)
     try:
-        message_id = MailClient(settings).send(to_addr, subject, body)
-        logger.info("Письмо оператору отправлено на %s (host=%s, message_id=%s)",
-                    to_addr, report.problem.host_name, message_id)
+        message_id = MailClient(settings).send(to_addr, subject, body, cc_addrs=settings.mail_cc_list)
+        logger.info("Письмо оператору отправлено на %s (копия: %s) (host=%s, message_id=%s)",
+                    to_addr, settings.mail_cc_list or "—", report.problem.host_name, message_id)
         return True
     except Exception as exc:
         logger.error("Ошибка отправки письма оператору %s: %s", to_addr, exc)
