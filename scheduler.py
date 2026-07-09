@@ -26,6 +26,7 @@ from mailer import send_provider_notification
 from matcher import RegistryMatcher
 from models import IncidentReport
 from notifier import build_notification, create_bot, send_notification
+from pyrus_sync import sync_registry
 from report import print_incident_reports
 from zabbix import ZabbixApi
 
@@ -85,9 +86,20 @@ class SentRegistry:
         return frozenset(self._sent)
 
 
+class MatcherRef:
+    """Изменяемая ссылка на текущий RegistryMatcher. check_rpm получает её
+    один раз при старте планировщика; run_pyrus_sync подменяет .value после
+    каждой успешной ежедневной синхронизации — без этого обновлённый реестр
+    подхватывался бы только при перезапуске процесса."""
+
+    def __init__(self, matcher: RegistryMatcher | None) -> None:
+        self.value = matcher
+
+
 def _build_matcher(settings: Settings) -> RegistryMatcher | None:
-    """Загружает реестр каналов связи Pyrus из PostgreSQL (наполняется
-    отдельным проектом registry-pyrus-tasks) и строит matcher по IP."""
+    """Загружает реестр каналов связи Pyrus из PostgreSQL (таблицу pyrus_sites
+    наполняет сама ежедневная синхронизация, см. pyrus_sync.py) и строит
+    matcher по IP."""
     try:
         conn = get_connection(settings)
         try:
@@ -117,18 +129,38 @@ def _sync_pipeline(
         return pipeline.run(zapi, junos, matcher, skip_eventids=skip_eventids)
 
 
+async def run_pyrus_sync(settings: Settings, matcher_ref: MatcherRef) -> None:
+    """Ежедневная задача планировщика: тянет реестр из Pyrus в pyrus_sites
+    и, если что-то сохранилось, перестраивает matcher на свежих данных —
+    без этого обновление реестра подхватывалось бы только при рестарте."""
+    logger.info("▶ Запуск ежедневной синхронизации реестра Pyrus")
+    try:
+        saved = await asyncio.to_thread(sync_registry, settings)
+    except Exception as exc:
+        logger.error("Синхронизация реестра Pyrus завершилась с ошибкой: %s", exc)
+        return
+
+    logger.info("◀ Синхронизация реестра Pyrus завершена: %d задач сохранено", saved)
+    if not saved:
+        return
+
+    new_matcher = await asyncio.to_thread(_build_matcher, settings)
+    if new_matcher is not None:
+        matcher_ref.value = new_matcher
+
+
 async def check_rpm(
-    settings: Settings,
-    bot:      Bot,
-    matcher:  RegistryMatcher | None,
-    sent:     SentRegistry,
+    settings:    Settings,
+    bot:         Bot,
+    matcher_ref: MatcherRef,
+    sent:        SentRegistry,
 ) -> None:
     logger.debug("▶ Запуск RPM-проверки")
     sent.purge()
     try:
         # Уже отработанные инциденты отсекаются на входе пайплайна —
         # для них не выполняются ни junos-проверки, ни уведомления.
-        reports = await asyncio.to_thread(_sync_pipeline, settings, matcher, sent.snapshot())
+        reports = await asyncio.to_thread(_sync_pipeline, settings, matcher_ref.value, sent.snapshot())
     except Exception as exc:
         logger.error("Ошибка выполнения pipeline: %s", exc)
         return
@@ -194,8 +226,16 @@ async def main() -> None:
         proxy=settings.bot_proxy,
     )
 
-    # Реестр Pyrus загружается один раз при старте.
-    matcher = _build_matcher(settings)
+    if not settings.pyrus_configured:
+        logger.warning(
+            "Pyrus не сконфигурирован (PYRUS_LOGIN/PYRUS_TOKEN/PYRUS_FORM_ID) — "
+            "ежедневная синхронизация реестра работать не будет.",
+        )
+
+    # Реестр Pyrus загружается один раз при старте (из БД, которую
+    # наполняет ежедневная синхронизация ниже) и хранится за изменяемой
+    # ссылкой, чтобы run_pyrus_sync мог подменить его на свежий без рестарта.
+    matcher_ref = MatcherRef(_build_matcher(settings))
 
     # Отметки об отработанных инцидентах. eventid Zabbix уникальны и не
     # переиспользуются, поэтому TTL нужен только как гигиена памяти; он
@@ -208,17 +248,31 @@ async def main() -> None:
         check_rpm,
         trigger="interval",
         minutes=CHECK_INTERVAL_MINUTES,
-        args=[settings, bot, matcher, sent],
+        args=[settings, bot, matcher_ref, sent],
         id="rpm_check",
         max_instances=1,
         coalesce=True,
         replace_existing=True,
     )
+    scheduler.add_job(
+        run_pyrus_sync,
+        trigger="cron",
+        hour=settings.pyrus_sync_hour,
+        minute=settings.pyrus_sync_minute,
+        args=[settings, matcher_ref],
+        id="pyrus_registry_sync",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Планировщик запущен. Интервал: %d минут. Нажмите Ctrl+C для остановки.",
-                CHECK_INTERVAL_MINUTES)
+    logger.info(
+        "Планировщик запущен. RPM-проверка каждые %d минут, синхронизация "
+        "реестра Pyrus ежедневно в %02d:%02d. Нажмите Ctrl+C для остановки.",
+        CHECK_INTERVAL_MINUTES, settings.pyrus_sync_hour, settings.pyrus_sync_minute,
+    )
 
-    await check_rpm(settings, bot, matcher, sent)  # немедленный первый запуск
+    await check_rpm(settings, bot, matcher_ref, sent)  # немедленный первый запуск
 
     try:
         await asyncio.Event().wait()

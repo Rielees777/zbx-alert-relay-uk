@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     log_level: str = Field("INFO", validation_alias=AliasChoices("LOG_LEVEL", "log_level"))
 
     # Реестр каналов связи Pyrus читается из таблицы pyrus_sites в готовой
-    # БД devnetops_oass_database (DB_*), которую наполняет отдельный проект
-    # registry-pyrus-tasks — сам к Pyrus API этот сервис больше не ходит.
+    # БД devnetops_oass_database (DB_*). Эту таблицу наполняет сам сервис —
+    # см. pyrus_sync.py и db_write/ — раз в сутки по расписанию (scheduler.py).
     db_host: str = Field(
         "float-dbass-db1.sovcombank.group", validation_alias=AliasChoices("DB_HOST", "db_host"),
     )
@@ -34,11 +34,28 @@ class Settings(BaseSettings):
     db_name: str = Field(
         "devnetops_oass_database", validation_alias=AliasChoices("DB_NAME", "db_name"),
     )
-    # Схема, в которой registry-pyrus-tasks держит pyrus_sites (та же
-    # DB_SCHEMA, что и в его .env; по умолчанию public).
-    db_schema:   str = Field("public", validation_alias=AliasChoices("DB_SCHEMA",   "db_schema"))
-    db_user:     str = Field("", validation_alias=AliasChoices("DB_USER",     "db_user"))
-    db_password: str = Field("", validation_alias=AliasChoices("DB_PASSWORD", "db_password"))
+    # Отдельная схема под реестр Pyrus вместо public (создаётся автоматически).
+    db_schema:     str = Field("public", validation_alias=AliasChoices("DB_SCHEMA",     "db_schema"))
+    db_user:       str = Field("", validation_alias=AliasChoices("DB_USER",       "db_user"))
+    db_password:   str = Field("", validation_alias=AliasChoices("DB_PASSWORD",   "db_password"))
+    # Размер батча при upsert реестра в БД.
+    db_batch_size: int = Field(1000, validation_alias=AliasChoices("DB_BATCH_SIZE", "db_batch_size"))
+
+    # Pyrus API (PYRUS_*) — источник данных для ежедневной синхронизации
+    # реестра каналов связи в pyrus_sites (pyrus_sync.sync_registry).
+    pyrus_login:   str  = Field("",    validation_alias=AliasChoices("PYRUS_LOGIN",   "pyrus_login"))
+    pyrus_token:   str  = Field("",    validation_alias=AliasChoices("PYRUS_TOKEN",   "pyrus_token"))
+    pyrus_form_id: int  = Field(0,     validation_alias=AliasChoices("PYRUS_FORM_ID", "pyrus_form_id"))
+    # Выгружать только задачи УК-* (PyrusSite.is_uk).
+    pyrus_uk_only: bool = Field(False, validation_alias=AliasChoices("PYRUS_UK_ONLY", "pyrus_uk_only"))
+    # Время ежедневного запуска синхронизации реестра Pyrus (локальное
+    # время процесса), см. scheduler.py.
+    pyrus_sync_hour:   int = Field(3, validation_alias=AliasChoices("PYRUS_SYNC_HOUR",   "pyrus_sync_hour"))
+    pyrus_sync_minute: int = Field(0, validation_alias=AliasChoices("PYRUS_SYNC_MINUTE", "pyrus_sync_minute"))
+
+    @property
+    def pyrus_configured(self) -> bool:
+        return bool(self.pyrus_login and self.pyrus_token and self.pyrus_form_id)
 
     # Juniper / PyEZ (JUNOS_*)
     junos_user:     str = Field("",  validation_alias=AliasChoices("JUNOS_USER",     "junos_user"))
