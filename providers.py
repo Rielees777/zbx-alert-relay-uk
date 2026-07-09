@@ -76,6 +76,23 @@ PROVIDER_ALIASES: dict[str, str] = {
 }
 
 
+def _clean_key(raw: str) -> str:
+    key = raw.lower().replace("ё", "е")
+    key = re.sub(r'\b(пао|оао|ооо|зао|ао)\b', '', key)
+    key = re.sub(r'["\'\«\»]', '', key)
+    key = re.sub(r'\s+', ' ', key).strip()
+    return key
+
+
+def is_aliased(raw: str | None) -> bool:
+    """True, если raw резолвится через реальную запись в PROVIDER_ALIASES,
+    а не просто возвращается как есть (см. normalize_provider fallback)."""
+    if not raw:
+        return False
+    key = _clean_key(raw)
+    return key in PROVIDER_ALIASES or any(alias in key for alias in PROVIDER_ALIASES)
+
+
 def normalize_provider(raw: str | None) -> str | None:
     """
     Нормализует любое написание провайдера → каноническое имя.
@@ -85,10 +102,7 @@ def normalize_provider(raw: str | None) -> str | None:
     if not raw:
         return None
 
-    key = raw.lower().replace("ё", "е")
-    key = re.sub(r'\b(пао|оао|ооо|зао|ао)\b', '', key)
-    key = re.sub(r'["\'\«\»]', '', key)
-    key = re.sub(r'\s+', ' ', key).strip()
+    key = _clean_key(raw)
 
     if key in PROVIDER_ALIASES:
         return PROVIDER_ALIASES[key]
