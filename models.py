@@ -137,6 +137,11 @@ class IncidentReport:
     unreachable:     bool                     = False   # железка недоступна по управлению (SSH)
     pyrus_site:      PyrusSite | None         = None
     pyrus_channel:   ChannelInfo | None       = None
+    # Инвентарь BGP-каналов узла (junos.switcher.BgpChannel) — заполняется
+    # только при DEGRADED_CHANNEL, для статистики по переключению (см.
+    # pipeline._attach_bgp_channels); не типизирован явно, чтобы не тянуть
+    # сюда junos и не заводить цикл импортов (junos → models).
+    bgp_channels:    list                     = field(default_factory=list)
 
     @property
     def has_loss(self) -> bool:

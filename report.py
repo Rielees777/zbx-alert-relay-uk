@@ -77,6 +77,12 @@ def _print_incident(r: IncidentReport) -> None:
         for res in r.ipsec_results:
             status = f"потери: {res.loss} пак." if res.has_loss else "OK"
             print(f"    {res.interface:<25} {res.local_ip} → {res.remote_ip:<16} {status}")
+
+    if r.bgp_channels:
+        print(f"  Каналы узла ({len(r.bgp_channels)}, для статистики по переключению):")
+        for c in r.bgp_channels:
+            marker = "→ текущий" if c.is_primary else ""
+            print(f"    {c.group:<12} P{c.priority or '?':<3} {c.description or c.neighbor:<24} {marker}")
     print()
 
 

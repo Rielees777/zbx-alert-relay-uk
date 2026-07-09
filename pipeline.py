@@ -94,7 +94,7 @@ def _process_problem(zabbix_api, junos_api, problem: RpmProblem) -> IncidentRepo
             "Потери L2VPN %.1f%% > %.1f%%: host=%s, cod=%s",
             l2vpn_loss_pct, L2VPN_LOSS_THRESHOLD_PCT, problem.host_name, problem.cod_name,
         )
-        _handle_l2vpn_loss(zabbix_api, report)
+        _handle_l2vpn_loss(zabbix_api, junos_api, report)
 
     else:
         logger.info("L2VPN без потерь (%.1f%%): host=%s — проверяю IPSEC", l2vpn_loss_pct, problem.host_name)
@@ -103,7 +103,7 @@ def _process_problem(zabbix_api, junos_api, problem: RpmProblem) -> IncidentRepo
     return report
 
 
-def _handle_l2vpn_loss(zabbix_api, report: IncidentReport) -> None:
+def _handle_l2vpn_loss(zabbix_api, junos_api, report: IncidentReport) -> None:
     util_pct = _check_channel_utilization(zabbix_api, report.problem)
     report.utilization_pct = util_pct
 
@@ -120,6 +120,24 @@ def _handle_l2vpn_loss(zabbix_api, report: IncidentReport) -> None:
             report.problem.host_name,
         )
         report.decision = IncidentDecision.DEGRADED_CHANNEL
+        _attach_bgp_channels(junos_api, report)
+
+
+def _attach_bgp_channels(junos_api, report: IncidentReport) -> None:
+    """
+    Переключение каналов сейчас отключено (const.CHANNEL_SWITCHING_ENABLED) —
+    почта и чат-бот пока на тестовых адресатах. Вместо переключения при
+    деградации канала печатаем в консоль инвентарь каналов узла (группы и
+    приоритеты из BGP-конфига), чтобы накопить статистику, как часто
+    переключение реально бы потребовалось.
+    """
+    problem = report.problem
+    if not problem.ip:
+        return
+    try:
+        report.bgp_channels = junos_api.list_bgp_channels(problem.ip)
+    except Exception as exc:
+        logger.warning("Не удалось получить список каналов %s: %s", problem.ip, exc)
 
 
 def _handle_l2vpn_ok(junos_api, report: IncidentReport) -> None:
