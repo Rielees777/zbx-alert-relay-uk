@@ -78,3 +78,11 @@ def get_cod_by_name(name: str | None) -> COD | None:
         if cod.name == name:
             return cod
     return None
+
+
+def cod_ips() -> frozenset[str]:
+    """IP самих узлов ЦОД (o2/ix/n11/m1) — это хабовая сторона каналов,
+    не площадки; алерты по ним не отрабатываются, даже если IP попадает
+    в ALLOWED_IP_NETWORK (m1/n11 — попадают)."""
+    cods = CODs()
+    return frozenset(cod.ip for cod in (cods.o2, cods.ix, cods.n11, cods.m1))

@@ -11,6 +11,7 @@ from const import (
     PING_COUNT,
     TRIGGER_PATTERNS,
     UTIL_LOOKBACK_MINUTES,
+    cod_ips,
 )
 from models import IncidentDecision, IncidentReport, RpmProblem
 
@@ -48,6 +49,7 @@ def _collect_problems(
 ) -> list[RpmProblem]:
     seen:   set[str]         = set()
     result: list[RpmProblem] = []
+    cod_ip_set = cod_ips()
     for pattern in TRIGGER_PATTERNS:
         for p in zabbix_api.get_active_rpm_problems(pattern=pattern):
             # Обрабатываем только узлы из ALLOWED_IP_NETWORK — остальные
@@ -55,6 +57,13 @@ def _collect_problems(
             if not _in_allowed_network(p.ip):
                 logger.debug("IP %r вне сети %s — пропуск: %s",
                              p.ip, ALLOWED_IP_NETWORK, p.trigger_name)
+                continue
+            # ЦОД — хабовая сторона каналов, не площадка; целью отработки
+            # алертов не является, даже если его IP попадает в сеть выше
+            # (m1/n11 — попадают).
+            if p.ip in cod_ip_set:
+                logger.debug("IP %r принадлежит ЦОД (%s) — пропуск: %s",
+                             p.ip, p.cod_name, p.trigger_name)
                 continue
             # Site-алерты ("Потери до <площадка>") обрабатываются всегда;
             # канальные — только l2vpn.
