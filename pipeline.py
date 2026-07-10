@@ -167,6 +167,16 @@ def _attach_bgp_channels(junos_api, report: IncidentReport) -> None:
 
 
 def _handle_l2vpn_ok(junos_api, report: IncidentReport) -> None:
+    """
+    L2VPN-транспорт без потерь — раз RPM всё же сработал, дело либо в
+    IPSEC-тоннеле поверх канала, либо это ложное срабатывание.
+
+    Потери по IPSEC оператору/в чат не сообщаются вовсе (это не проблема
+    провайдера канала) — по замыслу единственное следствие IPSEC_LOSS:
+    переключение канала на резервный (JunosApi.switch_channel), сейчас
+    отключено (const.CHANNEL_SWITCHING_ENABLED). Если потерь нет нигде —
+    инцидент закрывается как FALSE_POSITIVE, дальнейших действий не требует.
+    """
     ipsec_results = junos_api.analyze_ipsec(report.problem, count=PING_COUNT)
     report.ipsec_results = ipsec_results
 
