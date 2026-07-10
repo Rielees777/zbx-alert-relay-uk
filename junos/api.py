@@ -57,12 +57,20 @@ class JunosApi:
             )
         return IncidentReport(problem=problem, ping_results=results)
 
-    def analyze_ipsec(self, problem: RpmProblem, count: int = 100) -> list[PingResult]:
+    def analyze_ipsec(self, problem: RpmProblem, count: int = 100) -> list[PingResult] | None:
         """
         Проверка IPSEC-туннелей. Адреса BGP-соседей — это и есть адреса
         туннелей, построенных поверх каналов (description соседа называет
         транспортный канал: "m1-rtk-l2vpn"), поэтому цели пинга берутся из
         BGP-конфига; фолбэк — прежний поиск ipsec-интерфейсов по description.
+
+        Возвращает None, если проверку выполнить не удалось (обрыв
+        подключения, ошибка RPC и т.п.) — отличаем от штатного «проверили,
+        потерь нет». Раз L2VPN-транспорт уже подтверждён исправным
+        (analyze_ipsec вызывается только тогда), а QoS в сети не настроен,
+        не пропинговать IPSEC с высокой вероятностью означает, что канал
+        всё-таки лёг — вызывающий код (pipeline._handle_l2vpn_ok) трактует
+        None так же, как потери, а не как ложное срабатывание.
         """
         if not problem.ip or (not problem.cod_name and not problem.site_alert):
             return []
@@ -80,10 +88,10 @@ class JunosApi:
                 return [pinger.ping_link(link, count=count) for link in links]
         except Exception as exc:
             logger.warning(
-                "Ошибка ping IPSEC %s (host=%s): %s",
+                "Ошибка ping IPSEC %s (host=%s): %s — трактуем как потери в тоннеле",
                 problem.ip, problem.host_name, exc,
             )
-            return []
+            return None
 
     @staticmethod
     def _read_bgp_config(dev):

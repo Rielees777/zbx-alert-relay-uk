@@ -176,11 +176,17 @@ def _handle_l2vpn_ok(junos_api, report: IncidentReport) -> None:
     переключение канала на резервный (JunosApi.switch_channel), сейчас
     отключено (const.CHANNEL_SWITCHING_ENABLED). Если потерь нет нигде —
     инцидент закрывается как FALSE_POSITIVE, дальнейших действий не требует.
+
+    analyze_ipsec может вернуть None вместо списка — проверку не удалось
+    выполнить (обрыв RPC и т.п.), а не «потерь нет». QoS в сети не
+    настроен, так что раз L2VPN уже подтверждён исправным, а IPSEC
+    пропинговать не вышло — это тоже трактуется как потери, а не как
+    ложное срабатывание.
     """
     ipsec_results = junos_api.analyze_ipsec(report.problem, count=PING_COUNT)
-    report.ipsec_results = ipsec_results
+    report.ipsec_results = ipsec_results or []
 
-    if any(r.has_loss for r in ipsec_results):
+    if ipsec_results is None or any(r.has_loss for r in ipsec_results):
         logger.warning("Потери в IPSEC-тоннеле: host=%s → IPSEC_LOSS", report.problem.host_name)
         report.decision = IncidentDecision.IPSEC_LOSS
     else:
