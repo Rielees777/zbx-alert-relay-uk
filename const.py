@@ -1,5 +1,10 @@
+import ipaddress
 from dataclasses import dataclass
 
+
+# Обрабатываются только алерты узлов с management IP из этой сети; остальные
+# отсекаются на входе пайплайна — до Junos-проверок и поиска в реестре Pyrus.
+ALLOWED_IP_NETWORK = ipaddress.ip_network("10.70.138.0/24")
 
 TRIGGER_PATTERNS: list[str] = [
     "RPM потери до",   # канальный алерт: "RPM потери до m1-rtk-l2vpn - 20 %"

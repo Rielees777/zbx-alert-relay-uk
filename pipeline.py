@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import ipaddress
 import logging
 
 from const import (
     ALLOWED_CHANNEL_TYPES,
+    ALLOWED_IP_NETWORK,
     CHANNEL_UTIL_THRESHOLD_PCT,
     L2VPN_LOSS_THRESHOLD_PCT,
     PING_COUNT,
@@ -31,6 +33,15 @@ def run(zabbix_api, junos_api, matcher=None, skip_eventids: frozenset[str] = fro
     return reports
 
 
+def _in_allowed_network(ip: str | None) -> bool:
+    if not ip:
+        return False
+    try:
+        return ipaddress.ip_address(ip) in ALLOWED_IP_NETWORK
+    except ValueError:
+        return False
+
+
 def _collect_problems(
     zabbix_api,
     skip_eventids: frozenset[str] = frozenset(),
@@ -39,6 +50,12 @@ def _collect_problems(
     result: list[RpmProblem] = []
     for pattern in TRIGGER_PATTERNS:
         for p in zabbix_api.get_active_rpm_problems(pattern=pattern):
+            # Обрабатываем только узлы из ALLOWED_IP_NETWORK — остальные
+            # отсекаются здесь, до Junos-проверок и поиска в реестре.
+            if not _in_allowed_network(p.ip):
+                logger.debug("IP %r вне сети %s — пропуск: %s",
+                             p.ip, ALLOWED_IP_NETWORK, p.trigger_name)
+                continue
             # Site-алерты ("Потери до <площадка>") обрабатываются всегда;
             # канальные — только l2vpn.
             if not p.site_alert and p.channel_type not in ALLOWED_CHANNEL_TYPES:
