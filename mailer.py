@@ -22,7 +22,7 @@ import requests
 
 from const import get_cod_by_name, get_provider_email
 from models import IncidentDecision, IncidentReport
-from notifier import _avg_loss_pct, _contract, _operator
+from notifier import _contract, _operator, _report_loss_pct
 from providers import extract_email
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
     if channel_down:
         loss_line = "        - Потери ICMP: 100% (канал недоступен)"
     else:
-        loss_line = f"        - Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
+        loss_line = f"        - Потери ICMP: {_report_loss_pct(report):.0f}%"
 
     lines = [
         f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
@@ -104,7 +104,7 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
     if channel_down:
         loss_line = "        - Потери ICMP: 100% (канал недоступен)"
     else:
-        loss_line = f"        - Потери ICMP: {_avg_loss_pct(report.ping_results):.0f}%"
+        loss_line = f"        - Потери ICMP: {_report_loss_pct(report):.0f}%"
 
     lines = [
         f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
