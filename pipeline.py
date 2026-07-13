@@ -13,7 +13,7 @@ from const import (
     UTIL_LOOKBACK_MINUTES,
     cod_ips,
 )
-from models import IncidentDecision, IncidentReport, RpmProblem
+from models import IncidentDecision, IncidentReport, PingResult, RpmProblem
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,23 @@ def _process_problem(zabbix_api, junos_api, problem: RpmProblem) -> IncidentRepo
         )
         return report
 
-    l2vpn_loss_pct = _loss_pct(report.ping_results, PING_COUNT)
+    if problem.site_alert:
+        # Site-алерт покрывает сразу все L2VPN-каналы площадки: усреднять
+        # потери по ним нельзя (деградация одного канала теряется на фоне
+        # здоровых соседних, а иногда наоборот — полностью упавший канал
+        # смешивается со здоровыми и не дотягивает до CHANNEL_DOWN).
+        # Проверяем каждый канал по отдельности и берём худший — это и есть
+        # проблемный канал для дальнейшей диагностики и писем.
+        worst_link, l2vpn_loss_pct = _pick_worst_l2vpn_link(report.ping_results, PING_COUNT)
+        report.degraded_link = worst_link
+        if worst_link:
+            problem.channel_spec = worst_link.description
+            logger.info(
+                "Site-алерт: проблемный канал host=%s → %r (потери %.1f%%)",
+                problem.host_name, worst_link.description, l2vpn_loss_pct,
+            )
+    else:
+        l2vpn_loss_pct = _loss_pct(report.ping_results, PING_COUNT)
 
     # Канал полностью недоступен, если L2VPN-линки не найдены на устройстве
     # (интерфейс лёг) ИЛИ линки найдены, но потери 100%.
@@ -202,8 +218,9 @@ def _attach_pyrus(report: IncidentReport, matcher) -> None:
     site = matcher.find(report.problem.ip)
     if site:
         report.pyrus_site    = site
+        channel_hint = report.degraded_link.description if report.degraded_link else None
         report.pyrus_channel = matcher.find_channel(
-            site, report.problem.trigger_name, report.problem.host_name,
+            site, report.problem.trigger_name, report.problem.host_name, channel_hint,
         )
         if report.pyrus_channel:
             logger.debug("Pyrus matched: host=%s → task:%d channel:%s contract:%s",
@@ -231,6 +248,18 @@ def _loss_pct(ping_results, total_count: int) -> float:
     total_loss = sum(r.loss or 0 for r in ping_results)
     total_sent = total_count * len(ping_results)
     return total_loss / total_sent * 100
+
+
+def _pick_worst_l2vpn_link(
+    ping_results: list[PingResult], total_count: int,
+) -> tuple[PingResult | None, float]:
+    """Худший по потерям линк среди всех L2VPN-каналов площадки (site-алерт)
+    и его индивидуальный % потерь — в отличие от _loss_pct, здесь каждый
+    канал оценивается отдельно, а не смешивается со всеми остальными."""
+    if not ping_results or total_count <= 0:
+        return None, 0.0
+    worst = max(ping_results, key=lambda r: r.loss or 0)
+    return worst, (worst.loss or 0) / total_count * 100
 
 
 def _log_report(report: IncidentReport) -> None:

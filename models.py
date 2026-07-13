@@ -142,6 +142,12 @@ class IncidentReport:
     # pipeline._attach_bgp_channels); не типизирован явно, чтобы не тянуть
     # сюда junos и не заводить цикл импортов (junos → models).
     bgp_channels:    list                     = field(default_factory=list)
+    # Site-алерт покрывает сразу все L2VPN-каналы площадки — degraded_link
+    # это тот из ping_results, что определён как реально проблемный (см.
+    # pipeline._pick_worst_l2vpn_link); используется для выбора канала
+    # Pyrus и утилизации именно по нему, а не по площадке в среднем.
+    # Для канальных алертов не заполняется (там канал уже задан триггером).
+    degraded_link:   PingResult | None        = None
 
     @property
     def has_loss(self) -> bool:

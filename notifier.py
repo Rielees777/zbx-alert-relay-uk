@@ -77,7 +77,7 @@ def format_degradation_message(report: IncidentReport) -> str:
     contract = _contract(report, cod)
     address  = p.host_name or "—"
 
-    loss_pct = _avg_loss_pct(report.ping_results)
+    loss_pct = _report_loss_pct(report)
     util_str = _utilization_str(report.utilization_pct)
 
     return (
@@ -127,7 +127,7 @@ def format_site_degradation_message(report: IncidentReport) -> str:
     contract = _contract(report, cod)
     address  = p.host_name or "—"
 
-    loss_pct = _avg_loss_pct(report.ping_results)
+    loss_pct = _report_loss_pct(report)
     util_str = _utilization_str(report.utilization_pct)
 
     return (
@@ -183,3 +183,16 @@ def _avg_loss_pct(results, ping_count: int = PING_COUNT) -> float:
         return 0.0
     total = sum(r.loss or 0 for r in results)
     return total / (ping_count * len(results)) * 100
+
+
+def _report_loss_pct(report: IncidentReport, ping_count: int = PING_COUNT) -> float:
+    """
+    Site-алерт с несколькими L2VPN-каналами площадки: сообщение адресовано
+    оператору report.pyrus_channel (выбранному по report.degraded_link) —
+    потери в тексте должны быть про этот конкретный канал, а не усреднены
+    со здоровыми соседними (иначе цифра разойдётся с тем, о чём письмо).
+    Для канальных алертов degraded_link не заполняется — считаем как раньше.
+    """
+    if report.degraded_link is not None:
+        return (report.degraded_link.loss or 0) / ping_count * 100 if ping_count > 0 else 0.0
+    return _avg_loss_pct(report.ping_results, ping_count)

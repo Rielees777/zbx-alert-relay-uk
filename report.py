@@ -65,7 +65,8 @@ def _print_incident(r: IncidentReport) -> None:
         print(f"  L2VPN:")
         for res in r.ping_results:
             status = f"потери: {res.loss} пак." if res.has_loss else "OK"
-            print(f"    {res.interface:<25} {res.local_ip} → {res.remote_ip:<16} {status}")
+            marker = " → проблемный канал" if res is r.degraded_link else ""
+            print(f"    {res.interface:<25} {res.local_ip} → {res.remote_ip:<16} {status}{marker}")
     else:
         print("  ! L2VPN-линки не найдены на устройстве.")
 

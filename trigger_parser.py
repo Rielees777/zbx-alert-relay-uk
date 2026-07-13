@@ -4,7 +4,7 @@ import logging
 import re
 
 from models import ChannelInfo, PyrusSite
-from providers import normalize_provider
+from providers import is_aliased, normalize_provider
 
 logger = logging.getLogger(__name__)
 
@@ -116,10 +116,36 @@ class TriggerInfo:
         return self._normalize(self.site_name) == self._normalize(host_name)
 
 
+_DESC_SPLIT_RE = re.compile(r'[^0-9a-zA-Zа-яА-ЯёЁ]+')
+
+
+def provider_from_description(description: str | None) -> str | None:
+    """
+    Провайдер по описанию физического/логического интерфейса на устройстве
+    (напр. "uk-spb-kievskaya5-obit-l2vpn uplink") — используется для
+    site-алертов, где в имени триггера провайдера нет, но описание
+    конкретного проблемного канала (см. pipeline._pick_worst_l2vpn_link)
+    обычно его содержит.
+
+    Описание бьётся на сегменты по любым не-буквенно-цифровым разделителям
+    и каждый сегмент проверяется отдельно через is_aliased — так сегмент
+    типа канала (l2vpn/uplink) или часть имени узла не даст ложного
+    срабатывания на короткий алиас (напр. "rt"), как было бы при поиске
+    подстроки по всему описанию сразу.
+    """
+    if not description:
+        return None
+    for segment in _DESC_SPLIT_RE.split(description):
+        if segment and is_aliased(segment):
+            return normalize_provider(segment)
+    return None
+
+
 def find_channel_by_trigger(
     trigger_name: str,
     site: PyrusSite,
     host_name: str | None = None,
+    channel_hint: str | None = None,
 ) -> ChannelInfo | None:
     """
     По имени триггера находит нужный канал в задаче Pyrus.
@@ -135,7 +161,10 @@ def find_channel_by_trigger(
 
     Для site-триггеров дополнительно требуется совпадение имени площадки
     из триггера с видимым именем узла того же алерта (`host_name`) —
-    иначе канал не сопоставляется вовсе.
+    иначе канал не сопоставляется вовсе. Провайдера в site-триггере нет, но
+    `channel_hint` (описание конкретного проблемного канала с устройства,
+    см. pipeline._pick_worst_l2vpn_link) может его содержать — тогда канал
+    выбирается по совпадению провайдера, а не первый попавшийся L2VPN.
     """
     trigger = TriggerInfo(trigger_name)
     logger.debug(
@@ -162,6 +191,25 @@ def find_channel_by_trigger(
         logger.debug("find_channel_by_trigger: площадка %r совпадает с узлом %r", trigger.site_name, host_name)
         typed = [ch for ch in site.channels
                  if ch.service and "l2vpn" in ch.service.lower()]
+
+        # Если известно описание конкретного проблемного канала (пришло из
+        # поканальной проверки на устройстве) — сначала пробуем выбрать
+        # канал Pyrus по совпадению провайдера, а не первый L2VPN подряд.
+        hint_provider = provider_from_description(channel_hint)
+        if hint_provider:
+            by_provider = [ch for ch in typed if normalize_provider(ch.provider) == hint_provider]
+            if by_provider:
+                logger.debug(
+                    "find_channel_by_trigger: канал по описанию %r → провайдер %r → task:%d",
+                    channel_hint, hint_provider, site.task_id,
+                )
+                return by_provider[0]
+            logger.debug(
+                "find_channel_by_trigger: провайдер %r из описания %r не найден среди l2vpn-каналов "
+                "площадки (providers=%r) — фолбэк",
+                hint_provider, channel_hint, [ch.provider for ch in typed],
+            )
+
         if typed:
             return typed[0]
         logger.debug(
