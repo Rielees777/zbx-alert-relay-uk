@@ -111,21 +111,24 @@ class JunosApi:
 
     def _primary_l2vpn_link(self, dev, parser: JunosInterfaceParser) -> list[L2vpnLink]:
         """
-        Основной канал площадки для site-алерта: P1 среди l2vpn-каналов по
-        приоритету BGP (та же сортировка, что list_bgp_channels —
+        Основной канал площадки для site-алерта: P1 среди l2vpn/df-каналов
+        по приоритету BGP (та же сортировка, что list_bgp_channels —
         const.PRIORITY_BGP_GROUPS, внутри группы P1..Pn). Найденное
-        описание канала сопоставляется с l2vpn-интерфейсом устройства —
+        описание канала сопоставляется с l2vpn/df-интерфейсом устройства —
         пинг идёт по ИНТЕРФЕЙСНОМУ адресу (L2-транспорт), а не по адресу
         BGP-соседа (это IPSEC-туннель, см. _bgp_ping_targets).
 
-        Основным каналом может быть и тёмное волокно (description вида
-        "m1-df-ix-cortel" — df, не l2vpn), поэтому кандидатами считаются
-        оба типа: l2vpn И df.
-
-        Если BGP-конфиг не читается, подходящих каналов в нём нет, либо
-        описание P1-канала не находится среди интерфейсов устройства —
-        фолбэк на прежнее поведение (все l2vpn/df-интерфейсы без фильтра
-        по конкретному каналу).
+        Рассматриваются ТОЛЬКО каналы с приоритетом P1/P2 (основной/
+        резервный) — более глубокие (P3+) или без суффикса приоритета к
+        выбору не допускаются вовсе, ни как основной канал, ни в фолбэке.
+        Причина: get-config Junos отдаёт деактивированные (`deactivate ...`)
+        и просто старые неиспользуемые соседи в конфиге как есть — парсер
+        не проверяет их активность — а такие часто остаются с приоритетом
+        P3+. Без этого ограничения деактивированный/декомиссированный сосед
+        мог попасть в фолбэк как "ещё один l2vpn-интерфейс", не отвечать на
+        пинг и быть ошибочно выбран как проблемный канал (реальный случай:
+        деактивированный m1-orange-l2vpn с P3 был отправлен в письме вместо
+        живого n11-mts-l2vpn с P1).
         """
         try:
             channels = BgpChannelParser(self._read_bgp_config(dev)).channels(
@@ -135,27 +138,48 @@ class JunosApi:
             logger.warning("Не удалось прочитать BGP-конфиг для определения P1-канала: %s", exc)
             channels = []
 
-        primary_channels = [c for c in channels if c.channel_type in (JUNOS_WANT_L2VPN, JUNOS_WANT_DARK_FIBER)]
+        primary_channels = [
+            c for c in channels
+            if c.channel_type in (JUNOS_WANT_L2VPN, JUNOS_WANT_DARK_FIBER) and c.priority in (1, 2)
+        ]
+        if not primary_channels:
+            logger.warning(
+                "В BGP-конфиге нет L2VPN/df-каналов с приоритетом P1/P2 — "
+                "линки для проверки не определены"
+            )
+            return []
+
+        # Фолбэк тоже ограничен интерфейсами P1/P2-каналов — не всеми
+        # l2vpn/df-интерфейсами устройства (там могут быть деактивированные
+        # P3+ соседи или посторонние порты, см. докстринг выше).
+        candidate_descs = {(c.description or "").strip().lower() for c in primary_channels}
         all_links = parser.l2vpn_links(cod_name="", want=JUNOS_WANT_L2VPN)
         all_links += [
             l for l in parser.l2vpn_links(cod_name="", want=JUNOS_WANT_DARK_FIBER)
             if l not in all_links
         ]
-        if not primary_channels:
-            logger.warning("В BGP-конфиге нет L2VPN/df-каналов — фолбэк на все l2vpn/df-интерфейсы устройства")
-            return all_links
+        scoped_links = [l for l in all_links if (l.description or "").strip().lower() in candidate_descs]
 
         primary = primary_channels[0]   # уже отсортированы по приоритету — P1 первый
         primary_desc = (primary.description or "").strip().lower()
-        matched = [l for l in all_links if (l.description or "").strip().lower() == primary_desc]
+        matched = [l for l in scoped_links if (l.description or "").strip().lower() == primary_desc]
         if matched:
             return matched
 
+        if scoped_links:
+            logger.warning(
+                "Основной канал (P1, %r) не нашёлся среди интерфейсов устройства — "
+                "фолбэк на остальные P1/P2-интерфейсы (%d шт.)",
+                primary.description, len(scoped_links),
+            )
+            return scoped_links
+
         logger.warning(
-            "Основной канал (P1, %r) не нашёлся среди l2vpn/df-интерфейсов устройства — фолбэк на все",
-            primary.description,
+            "Ни один интерфейс устройства не соответствует P1/P2-каналам (%s) — "
+            "линки для проверки не найдены",
+            ", ".join(sorted(candidate_descs)) or "—",
         )
-        return all_links
+        return []
 
     @staticmethod
     def _read_bgp_config(dev):
@@ -186,7 +210,13 @@ class JunosApi:
             return []
 
         if problem.site_alert:
-            primary_channels = [c for c in channels if c.channel_type in (JUNOS_WANT_L2VPN, JUNOS_WANT_DARK_FIBER)]
+            # Только P1/P2 — см. докстринг _primary_l2vpn_link: глубже
+            # резерва (P3+, часто деактивированные/старые соседи) к выбору
+            # не допускается.
+            primary_channels = [
+                c for c in channels
+                if c.channel_type in (JUNOS_WANT_L2VPN, JUNOS_WANT_DARK_FIBER) and c.priority in (1, 2)
+            ]
             targets = primary_channels[:1]   # уже отсортированы по приоритету — только P1
         elif problem.channel_spec:
             spec = problem.channel_spec.lower()
