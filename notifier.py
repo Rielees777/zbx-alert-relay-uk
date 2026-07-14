@@ -163,8 +163,37 @@ def format_site_channel_down_message(report: IncidentReport) -> str:
     )
 
 
+def format_reserve_unavailable_message(report: IncidentReport) -> str:
+    """
+    Эскалация для site-алерта: основной канал не в порядке, а переключение
+    на резерв не удалось выполнить, т.к. резерв сам недоступен — в отличие
+    от обычной деградации/обрыва, здесь называются ОБА канала сразу.
+    """
+    p = report.problem
+    address = p.host_name or "—"
+
+    primary = report.primary_channel
+    reserve = report.pyrus_channel
+    primary_operator = (primary.provider if primary and primary.provider else None) or "—"
+    primary_contract = (primary.contract if primary and primary.contract else None) or "—"
+    reserve_operator = (reserve.provider if reserve and reserve.provider else None) or "—"
+    reserve_contract = (reserve.contract if reserve and reserve.contract else None) or "—"
+
+    return (
+        f"Зафиксирована недоступность ОСНОВНОГО И РЕЗЕРВНОГО каналов связи L2VPN "
+        f"площадки. Автоматическое переключение на резерв невозможно — резервный "
+        f"канал сам недоступен. Требуется ручное вмешательство.\n"
+        f"Диагностическая информация:\n"
+        f"1. Адрес площадки: {address}\n"
+        f"2. Основной канал: оператор {primary_operator}, договор {primary_contract}\n"
+        f"3. Резервный канал: оператор {reserve_operator}, договор {reserve_contract}"
+    )
+
+
 def build_notification(report: IncidentReport) -> str | None:
     d = report.decision
+    if d == IncidentDecision.RESERVE_UNAVAILABLE:
+        return format_reserve_unavailable_message(report)
     if report.problem.site_alert:
         if d == IncidentDecision.CHANNEL_DOWN:
             return format_site_channel_down_message(report)

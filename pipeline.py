@@ -14,6 +14,7 @@ from const import (
     cod_ips,
 )
 from models import IncidentDecision, IncidentReport, PingResult, RpmProblem
+from providers import normalize_provider
 from trigger_parser import provider_from_description
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,11 @@ def run(zabbix_api, junos_api, matcher=None, skip_eventids: frozenset[str] = fro
         _attach_pyrus(report, matcher)
         reports.append(report)
         _log_report(report)
+
+        escalation = _attempt_channel_switch(junos_api, report)
+        if escalation:
+            reports.append(escalation)
+            _log_report(escalation)
     return reports
 
 
@@ -237,6 +243,68 @@ def _attach_pyrus(report: IncidentReport, matcher) -> None:
         logger.warning("Pyrus: нет совпадения для хоста %s (ip=%r) — договор в сообщении будет «—»",
                         report.problem.host_name, report.problem.ip)
 
+
+def _attempt_channel_switch(junos_api, report: IncidentReport) -> IncidentReport | None:
+    """
+    Для site-алертов с решением CHANNEL_DOWN/DEGRADED_CHANNEL пытается
+    переключить основной канал на резерв (JunosApi.switch_channel — только
+    для site-алертов, канальные не трогает). Если резерв сам недоступен
+    (result.reserve_unavailable) — переключение не выполняется, вместо
+    этого формируется отдельный эскалационный инцидент
+    (RESERVE_UNAVAILABLE): сообщение мониторингу о недоступности ОБОИХ
+    каналов и письмо провайдеру именно резервного канала о его проблеме.
+
+    Пока переключение отключено (const.CHANNEL_SWITCHING_ENABLED=False),
+    switch_channel возвращает ошибку раньше проверки резерва —
+    reserve_unavailable остаётся False, эскалация не создаётся.
+
+    Возвращает None, если переключение прошло успешно, неприменимо
+    (канальный алерт / не тот decision), либо резерв доступен.
+    """
+    problem = report.problem
+    if not problem.site_alert or report.decision not in (
+        IncidentDecision.CHANNEL_DOWN, IncidentDecision.DEGRADED_CHANNEL,
+    ):
+        return None
+
+    result = junos_api.switch_channel(problem)
+    if result.success or not result.reserve_unavailable:
+        return None
+
+    reserve_provider = provider_from_description(result.reserve_description)
+    reserve_channel = None
+    if report.pyrus_site and reserve_provider:
+        reserve_channel = next(
+            (ch for ch in report.pyrus_site.channels
+             if ch.service and "l2vpn" in ch.service.lower()
+             and normalize_provider(ch.provider) == reserve_provider),
+            None,
+        )
+        if not reserve_channel:
+            logger.warning(
+                "Эскалация: провайдер резерва %r не сопоставлен ни с одним каналом "
+                "задачи task:%d — договор/адресат письма будут «—»/запасной",
+                reserve_provider, report.pyrus_site.task_id,
+            )
+    else:
+        logger.warning(
+            "Эскалация: провайдера резерва не удалось определить по описанию %r "
+            "(host=%s) — договор/адресат письма будут «—»/запасной",
+            result.reserve_description, problem.host_name,
+        )
+
+    logger.error(
+        "Резерв недоступен, переключение невозможно: host=%s, резерв=%r (%s)",
+        problem.host_name, result.reserve_description, result.reserve_check,
+    )
+    return IncidentReport(
+        problem=problem,
+        decision=IncidentDecision.RESERVE_UNAVAILABLE,
+        pyrus_site=report.pyrus_site,
+        pyrus_channel=reserve_channel,
+        primary_channel=report.pyrus_channel,
+    )
+
 def _check_channel_utilization(zabbix_api, problem: RpmProblem) -> float | None:
     return zabbix_api.get_channel_utilization_pct(
         problem.hostid, problem.channel_spec, UTIL_LOOKBACK_MINUTES,
@@ -294,3 +362,6 @@ def _log_report(report: IncidentReport) -> None:
         logger.warning("IPSEC_LOSS %s / %s", p.host_name, p.cod_name)
     elif d == IncidentDecision.FALSE_POSITIVE:
         logger.info("FALSE_POSITIVE %s / %s — закрыть инцидент", p.host_name, p.cod_name)
+    elif d == IncidentDecision.RESERVE_UNAVAILABLE:
+        logger.error("RESERVE_UNAVAILABLE %s / %s — резерв недоступен, переключение невозможно",
+                      p.host_name, p.cod_name)

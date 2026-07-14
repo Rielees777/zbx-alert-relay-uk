@@ -126,6 +126,33 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
     return subject, body
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ПИСЬМО ПРОВАЙДЕРУ РЕЗЕРВНОГО КАНАЛА (эскалация RESERVE_UNAVAILABLE):
+# основной канал в порядке проверки/переключения не участвует — это письмо
+# ИМЕННО про то, что резервный канал (найден недоступным при попытке
+# переключения) сам простаивает. report.pyrus_channel здесь — резервный
+# канал (см. pipeline._attempt_channel_switch).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_reserve_unavailable_email(report: IncidentReport) -> tuple[str, str]:
+    """(subject, body) письма провайдеру резервного канала. Обычный текст, CRLF."""
+    address = _address(report)
+    service = _service(report)
+    ch      = report.pyrus_channel   # резервный канал
+    contract = ch.contract if ch and ch.contract else "—"
+
+    lines = [
+        f"Здравствуйте! Наблюдается недоступность канала связи (резервного) по адресу: {address}. "
+        f"Услуга {service}.",
+        f"Договор: {contract}",
+        "Канал недоступен (потери ICMP 100%).",
+        "Просим взять в работу.",
+    ]
+    subject = f"Проблема на канале связи {service}: {address}"
+    body = "\r\n".join(lines)
+    return subject, body
+
+
 def channel_email(report: IncidentReport) -> str | None:
     """
     Email провайдера из сматченного канала Pyrus (ChannelInfo.email, cell 52
@@ -192,6 +219,7 @@ class MailClient:
 _MAILABLE_DECISIONS = frozenset({
     IncidentDecision.CHANNEL_DOWN,
     IncidentDecision.DEGRADED_CHANNEL,
+    IncidentDecision.RESERVE_UNAVAILABLE,
 })
 
 
@@ -236,7 +264,9 @@ def send_provider_notification(
         )
         return False
 
-    if report.problem.site_alert:
+    if report.decision == IncidentDecision.RESERVE_UNAVAILABLE:
+        subject, body = build_reserve_unavailable_email(report)
+    elif report.problem.site_alert:
         subject, body = build_site_provider_email(report)
     else:
         subject, body = build_provider_email(report)

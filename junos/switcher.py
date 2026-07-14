@@ -101,14 +101,19 @@ class SwitchPlan:
 @dataclass
 class SwitchResult:
     """Итог операции переключения (для лога/отчёта/чата)."""
-    success:       bool
-    dry_run:       bool
-    group:         str
-    neighbors:     tuple[str, str] | None = None   # (адрес A, адрес B)
-    commands:      list[str] = field(default_factory=list)
-    diff:          str | None = None               # вывод "show | compare"
-    error:         str | None = None
-    reserve_check: str | None = None               # итог пинга резерва перед переключением
+    success:             bool
+    dry_run:             bool
+    group:               str
+    neighbors:           tuple[str, str] | None = None   # (адрес A, адрес B)
+    commands:            list[str] = field(default_factory=list)
+    diff:                str | None = None               # вывод "show | compare"
+    error:               str | None = None
+    reserve_check:       str | None = None               # итог пинга резерва перед переключением
+    # True специально для случая «резерв сам недоступен» (в отличие от
+    # прочих ошибок — не задан IP, переключение отключено и т.п.) —
+    # вызывающий код (pipeline) отличает это как повод для эскалации.
+    reserve_unavailable: bool = False
+    reserve_description: str | None = None               # description резервного соседа (для провайдера)
 
 
 class BgpPolicySwitcher:

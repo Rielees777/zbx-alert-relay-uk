@@ -9,16 +9,18 @@ SEP  = "─" * _W
 SEP2 = "═" * _W
 
 _DECISION_LABELS: dict[IncidentDecision, str] = {
-    IncidentDecision.CHANNEL_DOWN:     "КАНАЛ НЕДОСТУПЕН — 100% потерь",
-    IncidentDecision.HIGH_UTILIZATION: "ВЫСОКАЯ ЗАГРУЗКА КАНАЛА",
-    IncidentDecision.DEGRADED_CHANNEL: "ДЕГРАДАЦИЯ КАНАЛА",
-    IncidentDecision.IPSEC_LOSS:       "ПОТЕРИ В IPSEC-ТОННЕЛЕ",
-    IncidentDecision.FALSE_POSITIVE:   "ЛОЖНОЕ СРАБАТЫВАНИЕ",
-    IncidentDecision.ERROR:            "ОШИБКА ПРОВЕРКИ",
+    IncidentDecision.CHANNEL_DOWN:        "КАНАЛ НЕДОСТУПЕН — 100% потерь",
+    IncidentDecision.HIGH_UTILIZATION:    "ВЫСОКАЯ ЗАГРУЗКА КАНАЛА",
+    IncidentDecision.DEGRADED_CHANNEL:    "ДЕГРАДАЦИЯ КАНАЛА",
+    IncidentDecision.IPSEC_LOSS:          "ПОТЕРИ В IPSEC-ТОННЕЛЕ",
+    IncidentDecision.FALSE_POSITIVE:      "ЛОЖНОЕ СРАБАТЫВАНИЕ",
+    IncidentDecision.ERROR:               "ОШИБКА ПРОВЕРКИ",
+    IncidentDecision.RESERVE_UNAVAILABLE: "ЭСКАЛАЦИЯ — ОСНОВНОЙ И РЕЗЕРВНЫЙ КАНАЛЫ НЕДОСТУПНЫ",
 }
 
 _ORDER = [
     IncidentDecision.ERROR,
+    IncidentDecision.RESERVE_UNAVAILABLE,
     IncidentDecision.CHANNEL_DOWN,
     IncidentDecision.HIGH_UTILIZATION,
     IncidentDecision.IPSEC_LOSS,
@@ -59,6 +61,14 @@ def _print_incident(r: IncidentReport) -> None:
 
     if r.error:
         print(f"  ! Ошибка: {r.error}")
+        return
+
+    if r.decision == IncidentDecision.RESERVE_UNAVAILABLE:
+        primary = r.primary_channel
+        reserve = r.pyrus_channel
+        print(f"  Основной канал : {primary.provider if primary else '—'} / {primary.contract if primary else '—'}")
+        print(f"  Резервный канал: {reserve.provider if reserve else '—'} / {reserve.contract if reserve else '—'} (недоступен)")
+        print()
         return
 
     if r.ping_results:

@@ -124,6 +124,10 @@ class IncidentDecision(str, Enum):
     IPSEC_LOSS       = "ipsec_loss"
     FALSE_POSITIVE   = "false_positive"
     ERROR            = "error"
+    # Site-алерт: основной канал недоступен/деградировал, попытка
+    # переключения на резерв не удалась, т.к. резерв сам недоступен —
+    # эскалация (см. pipeline._attempt_channel_switch).
+    RESERVE_UNAVAILABLE = "reserve_unavailable"
 
 
 @dataclass
@@ -148,6 +152,11 @@ class IncidentReport:
     # Pyrus и утилизации именно по нему, а не по площадке в среднем.
     # Для канальных алертов не заполняется (там канал уже задан триггером).
     degraded_link:   PingResult | None        = None
+    # Эскалация RESERVE_UNAVAILABLE: pyrus_channel здесь — РЕЗЕРВНЫЙ канал
+    # (для письма его провайдеру), primary_channel — основной, из-за
+    # которого изначально сработал алерт (для сообщения мониторингу, где
+    # нужно назвать оба). Для остальных decision не заполняется.
+    primary_channel: ChannelInfo | None       = None
 
     @property
     def has_loss(self) -> bool:

@@ -230,6 +230,11 @@ class JunosApi:
         import/export между двумя соседями группы (P1 ↔ P2). Операция
         симметрична — повторный вызов возвращает исходное состояние.
 
+        Только для site-алертов (problem.site_alert) — для канального
+        алерта переключение отдельного канала не выполняется вовсе, там
+        канал уже назван в триггере и обрабатывается через провайдера
+        напрямую.
+
         ВРЕМЕННО ОТКЛЮЧЕНО (const.CHANNEL_SWITCHING_ENABLED = False):
         логика пересматривается под приоритеты каналов по всем группам —
         см. list_bgp_channels.
@@ -238,8 +243,11 @@ class JunosApi:
         channel_spec из триггера — на него и планируется переключение)
         пингуется (см. _check_reserve); если он сам недоступен или проверку
         выполнить не удалось — переключение отменяется БЕЗ обращения к
-        конфигурации устройства: менять шило на мыло (переключать на тоже
-        нерабочий резерв) хуже, чем оставить как есть.
+        конфигурации устройства (result.reserve_unavailable=True): менять
+        шило на мыло (переключать на тоже нерабочий резерв) хуже, чем
+        оставить как есть. Вызывающий код (pipeline._attempt_channel_switch)
+        в этом случае формирует эскалацию — сообщение мониторингу и письмо
+        провайдеру резервного канала.
 
         dry_run=True — построить план, загрузить кандидат-конфиг, снять diff
         и откатить БЕЗ commit (безопасная проверка на живом устройстве).
@@ -255,6 +263,13 @@ class JunosApi:
                 "(const.CHANNEL_SWITCHING_ENABLED = False)"
             )
             logger.warning("switch_channel: %s (host=%s)", result.error, problem.host_name)
+            return result
+        if not problem.site_alert:
+            result.error = (
+                "Переключение канала выполняется только для site-алертов "
+                "(канальный алерт уже называет конкретный канал в триггере)"
+            )
+            logger.error("switch_channel: %s (host=%s)", result.error, problem.host_name)
             return result
         if not problem.ip:
             result.error = f"Нет IP для хоста '{problem.host_name}'"
@@ -279,10 +294,12 @@ class JunosApi:
                     plan.b if problem.channel_spec.lower() in (plan.a.description or "").lower()
                     else plan.a
                 )
+                result.reserve_description = reserve.description
                 reserve_ok, result.reserve_check = self._check_reserve(dev, cfg_xml, reserve, ping_count)
                 logger.info("switch_channel: проверка резерва %s (%s): %s",
                             reserve.address, reserve.description, result.reserve_check)
                 if not reserve_ok:
+                    result.reserve_unavailable = True
                     result.error = (
                         f"Резервный канал {reserve.address} ({reserve.description or '—'}) "
                         f"недоступен ({result.reserve_check}) — переключение отменено."

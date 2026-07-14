@@ -189,6 +189,26 @@ class FixtureJunosApi:
         cfg = self._by_eventid.get(problem.eventid, {})
         return [PingResult(**link) for link in cfg.get("ipsec_links", [])]
 
+    def switch_channel(self, problem, **kwargs):
+        """
+        По умолчанию — как боевой JunosApi при CHANNEL_SWITCHING_ENABLED=False:
+        сразу отказ, без эскалации. Ключ "switch" в алерте фикстуры
+        (напр. {"reserve_unavailable": true, "reserve_description": "..."})
+        позволяет смоделировать конкретный сценарий переключения.
+        """
+        from junos.switcher import SwitchResult
+
+        cfg = self._by_eventid.get(problem.eventid, {}).get("switch", {})
+        return SwitchResult(
+            success             = cfg.get("success", False),
+            dry_run             = cfg.get("dry_run", False),
+            group               = cfg.get("group", "ebgp"),
+            reserve_unavailable = cfg.get("reserve_unavailable", False),
+            reserve_description = cfg.get("reserve_description"),
+            reserve_check       = cfg.get("reserve_check"),
+            error               = cfg.get("error", "Переключение отключено (эмулятор, по умолчанию)"),
+        )
+
 
 def build_matcher(fixture: dict):
     """None означает «фикстура не задаёт свой реестр Pyrus» — вызывающий
