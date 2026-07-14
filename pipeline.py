@@ -7,6 +7,7 @@ from const import (
     ALLOWED_CHANNEL_TYPES,
     ALLOWED_IP_NETWORK,
     CHANNEL_UTIL_THRESHOLD_PCT,
+    EXCLUDED_IPS,
     L2VPN_LOSS_THRESHOLD_PCT,
     PING_COUNT,
     TRIGGER_PATTERNS,
@@ -71,6 +72,12 @@ def _collect_problems(
             if p.ip in cod_ip_set:
                 logger.debug("IP %r принадлежит ЦОД (%s) — пропуск: %s",
                              p.ip, p.cod_name, p.trigger_name)
+                continue
+            # Явно исключённые адреса (const.EXCLUDED_IPS) — алерты по ним
+            # не обрабатываются вовсе, независимо от прочих условий.
+            if p.ip in EXCLUDED_IPS:
+                logger.debug("IP %r в списке исключений — пропуск: %s",
+                             p.ip, p.trigger_name)
                 continue
             # Site-алерты ("Потери до <площадка>") обрабатываются всегда;
             # канальные — только l2vpn.

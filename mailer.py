@@ -274,6 +274,13 @@ def send_provider_notification(
         message_id = MailClient(settings).send(to_addr, subject, body, cc_addrs=settings.mail_cc_list)
         logger.info("Письмо оператору отправлено на %s (копия: %s) (host=%s, message_id=%s)",
                     to_addr, settings.mail_cc_list or "—", report.problem.host_name, message_id)
+        # Справочно: email провайдера из канала Pyrus (cell 52) — пока не
+        # подставляется как получатель (см. resolve_recipient/to_override),
+        # просто выводим в консоль для накопления статистики, насколько он
+        # совпадает с тем, что реально используется.
+        registry_addr = channel_email(report)
+        if registry_addr:
+            logger.info("Письмо отправлено провайдеру: %s (email из реестра каналов Pyrus)", registry_addr)
         return True
     except Exception as exc:
         logger.error("Ошибка отправки письма оператору %s: %s", to_addr, exc)
