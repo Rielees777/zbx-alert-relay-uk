@@ -14,6 +14,7 @@ from const import (
     cod_ips,
 )
 from models import IncidentDecision, IncidentReport, PingResult, RpmProblem
+from trigger_parser import provider_from_description
 
 logger = logging.getLogger(__name__)
 
@@ -253,12 +254,28 @@ def _loss_pct(ping_results, total_count: int) -> float:
 def _pick_worst_l2vpn_link(
     ping_results: list[PingResult], total_count: int,
 ) -> tuple[PingResult | None, float]:
-    """Худший по потерям линк среди всех L2VPN-каналов площадки (site-алерт)
+    """
+    Худший по потерям линк среди всех L2VPN-каналов площадки (site-алерт)
     и его индивидуальный % потерь — в отличие от _loss_pct, здесь каждый
-    канал оценивается отдельно, а не смешивается со всеми остальными."""
+    канал оценивается отдельно, а не смешивается со всеми остальными.
+
+    Site-алерт ищет l2vpn-линки на устройстве без фильтра по конкретному
+    каналу — если помимо реального контрактного канала на устройстве есть
+    посторонний/неиспользуемый интерфейс, тоже помеченный "l2vpn" в
+    description (запасной порт, неактивный тест и т.п.), он может не
+    отвечать на пинг вовсе (100% потерь) и перетягивать на себя весь
+    инцидент как CHANNEL_DOWN, хотя реальный канал всего лишь деградировал.
+    Поэтому в кандидаты сперва берём только линки, чьё описание опознаётся
+    как реальный провайдер (providers.PROVIDER_ALIASES, та же логика, что
+    и при выборе канала Pyrus) — посторонние порты обычно провайдера в
+    description не содержат. Если ни один линк провайдера не опознал —
+    откатываемся к полному списку (не хуже прежнего поведения).
+    """
     if not ping_results or total_count <= 0:
         return None, 0.0
-    worst = max(ping_results, key=lambda r: r.loss or 0)
+    candidates = [r for r in ping_results if provider_from_description(r.description)]
+    pool = candidates or ping_results
+    worst = max(pool, key=lambda r: r.loss or 0)
     return worst, (worst.loss or 0) / total_count * 100
 
 
