@@ -223,6 +223,7 @@ class JunosApi:
         group:           str = "ebgp",
         dry_run:         bool = False,
         confirm_minutes: int | None = 5,
+        ping_count:      int = 20,
     ) -> SwitchResult:
         """
         Переключает канал основной↔резервный: меняет местами пары BGP-политик
@@ -232,6 +233,13 @@ class JunosApi:
         ВРЕМЕННО ОТКЛЮЧЕНО (const.CHANNEL_SWITCHING_ENABLED = False):
         логика пересматривается под приоритеты каналов по всем группам —
         см. list_bgp_channels.
+
+        Перед переключением резервный сосед (тот, что НЕ совпадает с
+        channel_spec из триггера — на него и планируется переключение)
+        пингуется (см. _check_reserve); если он сам недоступен или проверку
+        выполнить не удалось — переключение отменяется БЕЗ обращения к
+        конфигурации устройства: менять шило на мыло (переключать на тоже
+        нерабочий резерв) хуже, чем оставить как есть.
 
         dry_run=True — построить план, загрузить кандидат-конфиг, снять diff
         и откатить БЕЗ commit (безопасная проверка на живом устройстве).
@@ -251,6 +259,10 @@ class JunosApi:
         if not problem.ip:
             result.error = f"Нет IP для хоста '{problem.host_name}'"
             return result
+        if not problem.channel_spec:
+            result.error = "channel_spec не задан — невозможно определить, какой сосед резервный"
+            logger.error("switch_channel: %s (host=%s)", result.error, problem.host_name)
+            return result
 
         try:
             from jnpr.junos.utils.config import Config
@@ -262,7 +274,23 @@ class JunosApi:
                     group=group, channel_spec=problem.channel_spec,
                 )
                 result.neighbors = (plan.a.address, plan.b.address)
-                result.commands  = plan.commands()
+
+                reserve = (
+                    plan.b if problem.channel_spec.lower() in (plan.a.description or "").lower()
+                    else plan.a
+                )
+                reserve_ok, result.reserve_check = self._check_reserve(dev, cfg_xml, reserve, ping_count)
+                logger.info("switch_channel: проверка резерва %s (%s): %s",
+                            reserve.address, reserve.description, result.reserve_check)
+                if not reserve_ok:
+                    result.error = (
+                        f"Резервный канал {reserve.address} ({reserve.description or '—'}) "
+                        f"недоступен ({result.reserve_check}) — переключение отменено."
+                    )
+                    logger.error("switch_channel: %s (host=%s)", result.error, problem.host_name)
+                    return result
+
+                result.commands = plan.commands()
 
                 with Config(dev, mode="exclusive") as cu:
                     cu.load("\n".join(result.commands), format="set")
@@ -294,6 +322,31 @@ class JunosApi:
             result.error = str(exc)
             logger.error("Ошибка переключения канала на %s: %s", problem.ip, exc)
         return result
+
+    @staticmethod
+    def _check_reserve(dev, cfg_xml, reserve, count: int) -> tuple[bool, str]:
+        """
+        Пингует резервного BGP-соседа (адрес — сам туннель поверх канала,
+        как и в _bgp_ping_targets) перед переключением на него; source —
+        local-address того же канала в конфиге, если задан.
+
+        Возвращает (доступен ли резерв, текстовое описание для лога/отчёта).
+        RpcError при пинге (обрыв RPC и т.п.) трактуется так же, как полная
+        недоступность — раз резерв не удалось проверить, переключать на
+        него нельзя.
+        """
+        channels  = BgpChannelParser(cfg_xml).channels()
+        ch        = next((c for c in channels if c.neighbor == reserve.address), None)
+        source_ip = ch.local_address if ch else None
+        try:
+            loss = JunosPinger(dev).ping_loss(dest_ip=reserve.address, source_ip=source_ip, count=count)
+        except RuntimeError as exc:
+            return False, f"проверить не удалось: {exc}"
+        if loss is None:
+            return False, "потери не определены (нет ответа от устройства)"
+        if loss >= count:
+            return False, f"потери {loss}/{count} (не отвечает)"
+        return True, f"потери {loss}/{count}"
 
     def _connect(self, host: str):
         from jnpr.junos import Device
