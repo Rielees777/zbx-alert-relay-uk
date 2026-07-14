@@ -10,10 +10,14 @@ logger = logging.getLogger(__name__)
 
 # Типы канала в имени триггера (а не провайдеры). "inet" — трафик через
 # интернет по белым IP (без выделенного L2VPN и без конкретного оператора).
-_CHANNEL_TYPES = frozenset({"l2vpn", "ipsec", "inet"})
+# "df" — тёмное волокно (dark fiber); в описании не обязательно последним
+# сегментом, напр. "m1-df-ix-cortel": m1 — узел/ЦОД, df — тип (волокно),
+# ix — транзитный ЦОД, через который идёт волокно (само по себе не тип и
+# не провайдер, просто справочный сегмент), cortel — провайдер.
+_CHANNEL_TYPES = frozenset({"l2vpn", "ipsec", "inet", "df"})
 
 # Тип канала из триггера → услуга (колонка «Услуга» в Pyrus).
-_TYPE_TO_SERVICE = {"inet": "интернет"}
+_TYPE_TO_SERVICE = {"inet": "интернет", "df": "тёмное волокно"}
 
 # "RPM потери до m1-ttk-l2vpn - 100 %"  → узел m1, провайдер ttk, тип l2vpn
 # "RPM потери до m1-inet - 100 %"       → узел m1, без провайдера, тип inet
@@ -56,14 +60,42 @@ class TriggerInfo:
                 if parts:
                     self.node = parts[0]
                     rest = parts[1:]
-                    # Последний сегмент — тип канала, если это известный тип.
-                    if rest and rest[-1].lower() in _CHANNEL_TYPES:
-                        self.channel_type = rest[-1].lower()
-                        rest = rest[:-1]
-                    # Что осталось между узлом и типом — провайдер (для inet его нет).
-                    if rest:
+                    # Тип канала — известный маркер СРЕДИ всех сегментов, не
+                    # обязательно последним (напр. "m1-df-ix-cortel": df —
+                    # тип, но не последний сегмент).
+                    type_idx = next(
+                        (i for i, seg in enumerate(rest) if seg.lower() in _CHANNEL_TYPES), None,
+                    )
+                    if type_idx is not None:
+                        self.channel_type = rest[type_idx].lower()
+                        rest = rest[:type_idx] + rest[type_idx + 1:]
+
+                    if len(rest) == 1:
+                        # Обычный случай: ровно один сегмент между узлом и
+                        # типом — провайдер, даже если алиаса для него ещё
+                        # нет (тогда normalize_provider вернёт как есть и
+                        # залогирует предупреждение — как и раньше).
                         self.provider_raw = rest[0]
                         self.provider     = normalize_provider(rest[0])
+                    elif len(rest) > 1:
+                        # Несколько сегментов сразу (напр. "df-ix-cortel" за
+                        # вычетом типа) — позиция провайдера не гарантирована
+                        # (может быть справочный сегмент вроде транзитного
+                        # ЦОД "ix"), поэтому ищем сегмент, который реально
+                        # опознаётся как известный провайдер, а не берём по
+                        # позиции наугад.
+                        hint = provider_from_description("-".join(rest))
+                        if hint:
+                            self.provider     = hint
+                            self.provider_raw = next(
+                                (seg for seg in rest if is_aliased(seg)), rest[0],
+                            )
+                        else:
+                            logger.warning(
+                                "Триггер %r: несколько сегментов (%r) между узлом и типом, "
+                                "провайдер не опознан ни в одном — договор может не найтись",
+                                raw, rest,
+                            )
 
         m_loss = _LOSS_RE.search(raw)
         if m_loss:

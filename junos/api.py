@@ -4,6 +4,7 @@ import logging
 
 from const import (
     CHANNEL_SWITCHING_ENABLED,
+    JUNOS_WANT_DARK_FIBER,
     JUNOS_WANT_IPSEC,
     JUNOS_WANT_L2VPN,
     PRIORITY_BGP_GROUPS,
@@ -109,9 +110,14 @@ class JunosApi:
         пинг идёт по ИНТЕРФЕЙСНОМУ адресу (L2-транспорт), а не по адресу
         BGP-соседа (это IPSEC-туннель, см. _bgp_ping_targets).
 
-        Если BGP-конфиг не читается, L2VPN-каналов в нём нет, либо описание
-        P1-канала не находится среди интерфейсов устройства — фолбэк на
-        прежнее поведение (все l2vpn-интерфейсы без фильтра по каналу).
+        Основным каналом может быть и тёмное волокно (description вида
+        "m1-df-ix-cortel" — df, не l2vpn), поэтому кандидатами считаются
+        оба типа: l2vpn И df.
+
+        Если BGP-конфиг не читается, подходящих каналов в нём нет, либо
+        описание P1-канала не находится среди интерфейсов устройства —
+        фолбэк на прежнее поведение (все l2vpn/df-интерфейсы без фильтра
+        по конкретному каналу).
         """
         try:
             channels = BgpChannelParser(self._read_bgp_config(dev)).channels(
@@ -121,20 +127,24 @@ class JunosApi:
             logger.warning("Не удалось прочитать BGP-конфиг для определения P1-канала: %s", exc)
             channels = []
 
-        l2vpn_channels = [c for c in channels if c.channel_type == "l2vpn"]
+        primary_channels = [c for c in channels if c.channel_type in (JUNOS_WANT_L2VPN, JUNOS_WANT_DARK_FIBER)]
         all_links = parser.l2vpn_links(cod_name="", want=JUNOS_WANT_L2VPN)
-        if not l2vpn_channels:
-            logger.warning("В BGP-конфиге нет L2VPN-каналов — фолбэк на все l2vpn-интерфейсы устройства")
+        all_links += [
+            l for l in parser.l2vpn_links(cod_name="", want=JUNOS_WANT_DARK_FIBER)
+            if l not in all_links
+        ]
+        if not primary_channels:
+            logger.warning("В BGP-конфиге нет L2VPN/df-каналов — фолбэк на все l2vpn/df-интерфейсы устройства")
             return all_links
 
-        primary = l2vpn_channels[0]   # уже отсортированы по приоритету — P1 первый
+        primary = primary_channels[0]   # уже отсортированы по приоритету — P1 первый
         primary_desc = (primary.description or "").strip().lower()
         matched = [l for l in all_links if (l.description or "").strip().lower() == primary_desc]
         if matched:
             return matched
 
         logger.warning(
-            "Основной канал (P1, %r) не нашёлся среди l2vpn-интерфейсов устройства — фолбэк на все",
+            "Основной канал (P1, %r) не нашёлся среди l2vpn/df-интерфейсов устройства — фолбэк на все",
             primary.description,
         )
         return all_links
@@ -153,9 +163,9 @@ class JunosApi:
         транспортный канал, через который туннель построен:
           • канальный алерт — туннель через канал из триггера
             (description == channel_spec, напр. "m1-rtk-l2vpn");
-          • site-алерт — туннель через ОСНОВНОЙ (P1 по приоритету) l2vpn-
-            канал площадки, тот же, что уже проверен в analyze_problem —
-            не все каналы сразу.
+          • site-алерт — туннель через ОСНОВНОЙ (P1 по приоритету) канал
+            площадки (l2vpn или df), тот же, что уже проверен в
+            analyze_problem — не все каналы сразу.
         Пингуется IP соседа; source — local-address соседа, если задан.
         Пустой список — вызывающий код уходит в интерфейсный фолбэк.
         """
@@ -168,8 +178,8 @@ class JunosApi:
             return []
 
         if problem.site_alert:
-            l2vpn_channels = [c for c in channels if c.channel_type == "l2vpn"]
-            targets = l2vpn_channels[:1]   # уже отсортированы по приоритету — только P1
+            primary_channels = [c for c in channels if c.channel_type in (JUNOS_WANT_L2VPN, JUNOS_WANT_DARK_FIBER)]
+            targets = primary_channels[:1]   # уже отсортированы по приоритету — только P1
         elif problem.channel_spec:
             spec = problem.channel_spec.lower()
             targets = [c for c in channels if (c.description or "").lower() == spec]

@@ -25,9 +25,10 @@ from dataclasses import dataclass, field
 _PRIORITY_RE = re.compile(r"-P(\d+)$", re.IGNORECASE)
 
 # Типы канала в description соседа. Позиция сегмента различается
-# ("m1-rtk-l2vpn", "n11-inet-megafon", "uk-spb-obvod60-l2vpn-obit"),
+# ("m1-rtk-l2vpn", "n11-inet-megafon", "uk-spb-obvod60-l2vpn-obit",
+# "m1-df-ix-cortel" — df = тёмное волокно, не последним сегментом),
 # поэтому тип ищется среди всех сегментов, а не по позиции.
-_CHANNEL_TYPES = frozenset({"l2vpn", "inet", "ipsec"})
+_CHANNEL_TYPES = frozenset({"l2vpn", "inet", "ipsec", "df"})
 
 
 @dataclass

@@ -29,6 +29,7 @@ MIN_ALERT_AGE_SEC: int = 300
 
 JUNOS_WANT_L2VPN: str = "l2vpn"
 JUNOS_WANT_IPSEC: str = "ipsec"
+JUNOS_WANT_DARK_FIBER: str = "df"
 
 # Автопереключение каналов (JunosApi.switch_channel) временно отключено:
 # логика пересматривается под приоритеты каналов (P1..Pn) по всем группам.
