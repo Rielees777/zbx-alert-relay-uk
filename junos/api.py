@@ -39,8 +39,15 @@ class JunosApi:
                 # Транспорт L2VPN проверяется по ИНТЕРФЕЙСНЫМ адресам каналов
                 # (серые /30 на L2). Адреса BGP-соседей — это IPSEC-туннели
                 # поверх каналов, их проверяет analyze_ipsec.
-                parser  = JunosInterfaceParser.from_device(dev)
-                links   = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_L2VPN)
+                parser = JunosInterfaceParser.from_device(dev)
+                if problem.site_alert:
+                    # Site-алерт не называет канал явно — по регламенту в
+                    # этом случае всегда проверяется ОСНОВНОЙ канал площадки
+                    # (P1 по приоритету BGP), а не перебор всех l2vpn-
+                    # интерфейсов подряд.
+                    links = self._primary_l2vpn_link(dev, parser)
+                else:
+                    links = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_L2VPN)
                 pinger  = JunosPinger(dev)
                 results = [pinger.ping_link(link, count=count) for link in links]
         except ConnectError as exc:
@@ -93,6 +100,45 @@ class JunosApi:
             )
             return None
 
+    def _primary_l2vpn_link(self, dev, parser: JunosInterfaceParser) -> list[L2vpnLink]:
+        """
+        Основной канал площадки для site-алерта: P1 среди l2vpn-каналов по
+        приоритету BGP (та же сортировка, что list_bgp_channels —
+        const.PRIORITY_BGP_GROUPS, внутри группы P1..Pn). Найденное
+        описание канала сопоставляется с l2vpn-интерфейсом устройства —
+        пинг идёт по ИНТЕРФЕЙСНОМУ адресу (L2-транспорт), а не по адресу
+        BGP-соседа (это IPSEC-туннель, см. _bgp_ping_targets).
+
+        Если BGP-конфиг не читается, L2VPN-каналов в нём нет, либо описание
+        P1-канала не находится среди интерфейсов устройства — фолбэк на
+        прежнее поведение (все l2vpn-интерфейсы без фильтра по каналу).
+        """
+        try:
+            channels = BgpChannelParser(self._read_bgp_config(dev)).channels(
+                priority_groups=PRIORITY_BGP_GROUPS,
+            )
+        except Exception as exc:
+            logger.warning("Не удалось прочитать BGP-конфиг для определения P1-канала: %s", exc)
+            channels = []
+
+        l2vpn_channels = [c for c in channels if c.channel_type == "l2vpn"]
+        all_links = parser.l2vpn_links(cod_name="", want=JUNOS_WANT_L2VPN)
+        if not l2vpn_channels:
+            logger.warning("В BGP-конфиге нет L2VPN-каналов — фолбэк на все l2vpn-интерфейсы устройства")
+            return all_links
+
+        primary = l2vpn_channels[0]   # уже отсортированы по приоритету — P1 первый
+        primary_desc = (primary.description or "").strip().lower()
+        matched = [l for l in all_links if (l.description or "").strip().lower() == primary_desc]
+        if matched:
+            return matched
+
+        logger.warning(
+            "Основной канал (P1, %r) не нашёлся среди l2vpn-интерфейсов устройства — фолбэк на все",
+            primary.description,
+        )
+        return all_links
+
     @staticmethod
     def _read_bgp_config(dev):
         """XML-конфиг ветки protocols/bgp с открытого устройства."""
@@ -107,18 +153,23 @@ class JunosApi:
         транспортный канал, через который туннель построен:
           • канальный алерт — туннель через канал из триггера
             (description == channel_spec, напр. "m1-rtk-l2vpn");
-          • site-алерт — все туннели через l2vpn-каналы площадки.
+          • site-алерт — туннель через ОСНОВНОЙ (P1 по приоритету) l2vpn-
+            канал площадки, тот же, что уже проверен в analyze_problem —
+            не все каналы сразу.
         Пингуется IP соседа; source — local-address соседа, если задан.
         Пустой список — вызывающий код уходит в интерфейсный фолбэк.
         """
         try:
-            channels = BgpChannelParser(self._read_bgp_config(dev)).channels()
+            channels = BgpChannelParser(self._read_bgp_config(dev)).channels(
+                priority_groups=PRIORITY_BGP_GROUPS,
+            )
         except Exception as exc:
             logger.warning("Не удалось прочитать BGP-конфиг %s: %s", problem.ip, exc)
             return []
 
         if problem.site_alert:
-            targets = [c for c in channels if c.channel_type == "l2vpn"]
+            l2vpn_channels = [c for c in channels if c.channel_type == "l2vpn"]
+            targets = l2vpn_channels[:1]   # уже отсортированы по приоритету — только P1
         elif problem.channel_spec:
             spec = problem.channel_spec.lower()
             targets = [c for c in channels if (c.description or "").lower() == spec]
