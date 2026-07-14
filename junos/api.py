@@ -34,7 +34,7 @@ class JunosApi:
                 problem=problem,
                 error=f"Не удалось определить COD из триггера (host={problem.host_name})",
             )
-        from jnpr.junos.exception import ConnectError
+        from jnpr.junos.exception import ConnectError, RpcTimeoutError
         try:
             with self._connect(problem.ip) as dev:
                 # Транспорт L2VPN проверяется по ИНТЕРФЕЙСНЫМ адресам каналов
@@ -51,11 +51,19 @@ class JunosApi:
                     links = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_L2VPN)
                 pinger  = JunosPinger(dev)
                 results = [pinger.ping_link(link, count=count) for link in links]
-        except ConnectError as exc:
-            # Железка недоступна по управлению — трактуем как полный обрыв канала.
+        except (ConnectError, RpcTimeoutError) as exc:
+            # Железка недоступна по управлению (ConnectError), либо
+            # подключились, но устройство не ответило на RPC-запрос
+            # диагностики за отведённое время (RpcTimeoutError — напр.
+            # get-interface-information). Оба случая трактуем как полный
+            # обрыв канала, а не тихую ERROR: RpcTimeoutError — это прямой
+            # сигнал "устройство не отвечает", а не ошибка обработки (та же
+            # логика уже применяется в JunosPinger.ping_loss для RPC ping;
+            # раньше она не распространялась на остальные RPC-запросы, и
+            # такие инциденты уходили в ERROR без единого уведомления).
             return IncidentReport(
                 problem=problem,
-                error=f"Устройство {problem.ip} недоступно по управлению: {exc}",
+                error=f"Устройство {problem.ip} не отвечает: {exc}",
                 unreachable=True,
             )
         except Exception as exc:
