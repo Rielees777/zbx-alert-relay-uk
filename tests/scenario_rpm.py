@@ -137,6 +137,12 @@ class _FakeDevice:
     def __init__(self, iface_xml: ET.Element, ping_xml: ET.Element) -> None:
         self.rpc = _FakeRpc(iface_xml, ping_xml)
 
+    def open(self):
+        pass
+
+    def close(self):
+        pass
+
     def __enter__(self):
         return self
 

@@ -36,43 +36,79 @@ class JunosApi:
                 error=f"Не удалось определить COD из триггера (host={problem.host_name})",
             )
         from jnpr.junos.exception import ConnectError, RpcTimeoutError
+
+        # Подключение и последующее закрытие сессии разделены намеренно:
+        # если диагностика (интерфейсы, пинг) уже успешно завершилась, а
+        # RpcTimeoutError вылетает только при закрытии сессии (RPC "close"
+        # — реальный случай из прода: устройство долго освобождало сессию
+        # уже после того, как отдало все нужные данные), это НЕ должно
+        # аннулировать уже полученные результаты и превращать их в
+        # CHANNEL_DOWN — сам канал тут ни при чём.
+        dev = self._connect(problem.ip)
         try:
-            with self._connect(problem.ip) as dev:
-                # Транспорт L2VPN проверяется по ИНТЕРФЕЙСНЫМ адресам каналов
-                # (серые /30 на L2). Адреса BGP-соседей — это IPSEC-туннели
-                # поверх каналов, их проверяет analyze_ipsec.
-                parser = JunosInterfaceParser.from_device(dev)
-                if problem.site_alert:
-                    # Site-алерт не называет канал явно — по регламенту в
-                    # этом случае всегда проверяется ОСНОВНОЙ канал площадки
-                    # (P1 по приоритету BGP), а не перебор всех l2vpn-
-                    # интерфейсов подряд.
-                    links = self._primary_l2vpn_link(dev, parser)
-                else:
-                    links = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_L2VPN)
-                pinger  = JunosPinger(dev)
-                results = [pinger.ping_link(link, count=count) for link in links]
+            dev.open()
         except (ConnectError, RpcTimeoutError) as exc:
-            # Железка недоступна по управлению (ConnectError), либо
-            # подключились, но устройство не ответило на RPC-запрос
-            # диагностики за отведённое время (RpcTimeoutError — напр.
-            # get-interface-information). Оба случая трактуем как полный
-            # обрыв канала, а не тихую ERROR: RpcTimeoutError — это прямой
-            # сигнал "устройство не отвечает", а не ошибка обработки (та же
-            # логика уже применяется в JunosPinger.ping_loss для RPC ping;
-            # раньше она не распространялась на остальные RPC-запросы, и
-            # такие инциденты уходили в ERROR без единого уведомления).
             return IncidentReport(
                 problem=problem,
                 error=f"Устройство {problem.ip} не отвечает: {exc}",
                 unreachable=True,
             )
         except Exception as exc:
+            return IncidentReport(problem=problem, error=f"Ошибка подключения к {problem.ip}: {exc}")
+
+        try:
+            # Транспорт L2VPN проверяется по ИНТЕРФЕЙСНЫМ адресам каналов
+            # (серые /30 на L2). Адреса BGP-соседей — это IPSEC-туннели
+            # поверх каналов, их проверяет analyze_ipsec.
+            parser = JunosInterfaceParser.from_device(dev)
+            if problem.site_alert:
+                # Site-алерт не называет канал явно — по регламенту в
+                # этом случае всегда проверяется ОСНОВНОЙ канал площадки
+                # (P1 по приоритету BGP), а не перебор всех l2vpn-
+                # интерфейсов подряд.
+                links = self._primary_l2vpn_link(dev, parser)
+            else:
+                links = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_L2VPN)
+            pinger  = JunosPinger(dev)
+            results = [pinger.ping_link(link, count=count) for link in links]
+        except (ConnectError, RpcTimeoutError) as exc:
+            # Устройство не ответило на RPC-запрос диагностики за отведённое
+            # время (напр. get-interface-information) — это прямой сигнал
+            # "устройство не отвечает", а не ошибка обработки (та же логика
+            # уже применяется в JunosPinger.ping_loss для RPC ping; раньше
+            # она не распространялась на остальные RPC-запросы, и такие
+            # инциденты уходили в ERROR без единого уведомления).
+            self._safe_close(dev, problem.ip)
+            return IncidentReport(
+                problem=problem,
+                error=f"Устройство {problem.ip} не отвечает: {exc}",
+                unreachable=True,
+            )
+        except Exception as exc:
+            self._safe_close(dev, problem.ip)
             return IncidentReport(
                 problem=problem,
                 error=f"Ошибка обработки {problem.ip}: {exc}",
             )
+
+        self._safe_close(dev, problem.ip)
         return IncidentReport(problem=problem, ping_results=results)
+
+    @staticmethod
+    def _safe_close(dev, host: str) -> None:
+        """
+        Закрывает NETCONF-сессию отдельно от самой диагностики: ошибка
+        закрытия (напр. RpcTimeoutError на RPC "close" — устройство долго
+        освобождает сессию) не должна аннулировать уже полученные и
+        возвращаемые вызывающему коду результаты, поэтому только логируется.
+        """
+        try:
+            dev.close()
+        except Exception as exc:
+            logger.warning(
+                "Не удалось корректно закрыть сессию к %s (результаты диагностики не затронуты): %s",
+                host, exc,
+            )
 
     def analyze_ipsec(self, problem: RpmProblem, count: int = 100) -> list[PingResult] | None:
         """
@@ -91,24 +127,41 @@ class JunosApi:
         """
         if not problem.ip or (not problem.cod_name and not problem.site_alert):
             return []
+
+        # Подключение/закрытие отдельно от диагностики — см. analyze_problem:
+        # ошибка закрытия сессии не должна аннулировать уже полученный
+        # результат пинга IPSEC.
+        dev = self._connect(problem.ip)
         try:
-            with self._connect(problem.ip) as dev:
-                links = self._bgp_ping_targets(dev, problem)
-                if not links:
-                    logger.debug(
-                        "BGP-соседи для IPSEC не найдены (host=%s) — фолбэк на интерфейсы",
-                        problem.host_name,
-                    )
-                    parser = JunosInterfaceParser.from_device(dev)
-                    links  = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_IPSEC)
-                pinger = JunosPinger(dev)
-                return [pinger.ping_link(link, count=count) for link in links]
+            dev.open()
+        except Exception as exc:
+            logger.warning(
+                "Ошибка подключения для IPSEC %s (host=%s): %s — трактуем как потери в тоннеле",
+                problem.ip, problem.host_name, exc,
+            )
+            return None
+
+        try:
+            links = self._bgp_ping_targets(dev, problem)
+            if not links:
+                logger.debug(
+                    "BGP-соседи для IPSEC не найдены (host=%s) — фолбэк на интерфейсы",
+                    problem.host_name,
+                )
+                parser = JunosInterfaceParser.from_device(dev)
+                links  = parser.l2vpn_links(cod_name=problem.cod_name or "", want=JUNOS_WANT_IPSEC)
+            pinger  = JunosPinger(dev)
+            results = [pinger.ping_link(link, count=count) for link in links]
         except Exception as exc:
             logger.warning(
                 "Ошибка ping IPSEC %s (host=%s): %s — трактуем как потери в тоннеле",
                 problem.ip, problem.host_name, exc,
             )
+            self._safe_close(dev, problem.ip)
             return None
+
+        self._safe_close(dev, problem.ip)
+        return results
 
     def _primary_l2vpn_link(self, dev, parser: JunosInterfaceParser) -> list[L2vpnLink]:
         """
@@ -247,8 +300,15 @@ class JunosApi:
         (const.PRIORITY_BGP_GROUPS, напр. DC-MOSCOW), затем остальные;
         внутри группы — по P1..Pn.
         """
-        with self._connect(host_ip) as dev:
+        # Подключение/закрытие отдельно от чтения конфига — см.
+        # analyze_problem: ошибка закрытия сессии не должна аннулировать
+        # уже прочитанный конфиг.
+        dev = self._connect(host_ip)
+        dev.open()
+        try:
             cfg_xml = self._read_bgp_config(dev)
+        finally:
+            self._safe_close(dev, host_ip)
 
         channels = BgpChannelParser(cfg_xml).channels(
             priority_groups=PRIORITY_BGP_GROUPS, only_groups=PARSED_BGP_GROUPS,
