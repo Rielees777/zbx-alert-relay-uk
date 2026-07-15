@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 
+from const import EXCLUDED_LINK_NETWORKS
 from models import L2vpnLink
 
 
@@ -44,7 +45,7 @@ class JunosInterfaceParser:
                         continue
                     for addr in af.findall("interface-address"):
                         local = self._text(addr, "ifa-local")
-                        if not local:
+                        if not local or self._is_excluded(local):
                             continue
                         links.append(
                             L2vpnLink(
@@ -55,6 +56,21 @@ class JunosInterfaceParser:
                             )
                         )
         return links
+
+    @staticmethod
+    def _is_excluded(local_str: str) -> bool:
+        """
+        Некоторые интерфейсы помимо реального транспортного адреса канала
+        несут на себе адрес из тестовой/служебной сети (см.
+        const.EXCLUDED_LINK_NETWORKS) — такой адрес пинговать нельзя
+        (закономерно не отвечает, даёт ложный CHANNEL_DOWN), поэтому он
+        отбрасывается ещё на этапе сбора линков.
+        """
+        try:
+            ip = ipaddress.ip_address(local_str.split("/")[0])
+        except ValueError:
+            return False
+        return any(ip in net for net in EXCLUDED_LINK_NETWORKS)
 
     @staticmethod
     def _remote_ip(local_str: str) -> str:
