@@ -7,6 +7,7 @@ from const import (
     JUNOS_WANT_DARK_FIBER,
     JUNOS_WANT_IPSEC,
     JUNOS_WANT_L2VPN,
+    PARSED_BGP_GROUPS,
     PRIORITY_BGP_GROUPS,
 )
 from models import IncidentReport, L2vpnLink, PingResult, RpmProblem
@@ -132,7 +133,7 @@ class JunosApi:
         """
         try:
             channels = BgpChannelParser(self._read_bgp_config(dev)).channels(
-                priority_groups=PRIORITY_BGP_GROUPS,
+                priority_groups=PRIORITY_BGP_GROUPS, only_groups=PARSED_BGP_GROUPS,
             )
         except Exception as exc:
             logger.warning("Не удалось прочитать BGP-конфиг для определения P1-канала: %s", exc)
@@ -203,7 +204,7 @@ class JunosApi:
         """
         try:
             channels = BgpChannelParser(self._read_bgp_config(dev)).channels(
-                priority_groups=PRIORITY_BGP_GROUPS,
+                priority_groups=PRIORITY_BGP_GROUPS, only_groups=PARSED_BGP_GROUPS,
             )
         except Exception as exc:
             logger.warning("Не удалось прочитать BGP-конфиг %s: %s", problem.ip, exc)
@@ -236,8 +237,10 @@ class JunosApi:
 
     def list_bgp_channels(self, host_ip: str) -> list[BgpChannel]:
         """
-        Инвентаризация каналов связи устройства: все BGP-группы и их соседи
-        с описанием, группами префиксов import/export и приоритетом из
+        Инвентаризация каналов связи устройства: соседи BGP-групп из
+        const.PARSED_BGP_GROUPS (пока только ebgp — остальные группы дают
+        шум/ложные срабатывания, диагностика по ним пока не готова) с
+        описанием, группами префиксов import/export и приоритетом из
         суффикса -P<n> имён политик (1 — основной, 2 — резервный, …).
 
         Список отсортирован: сначала каналы приоритетных групп
@@ -247,7 +250,9 @@ class JunosApi:
         with self._connect(host_ip) as dev:
             cfg_xml = self._read_bgp_config(dev)
 
-        channels = BgpChannelParser(cfg_xml).channels(priority_groups=PRIORITY_BGP_GROUPS)
+        channels = BgpChannelParser(cfg_xml).channels(
+            priority_groups=PRIORITY_BGP_GROUPS, only_groups=PARSED_BGP_GROUPS,
+        )
         logger.info(
             "BGP-каналы %s: %d шт. (%s)",
             host_ip, len(channels),
@@ -390,7 +395,7 @@ class JunosApi:
         недоступность — раз резерв не удалось проверить, переключать на
         него нельзя.
         """
-        channels  = BgpChannelParser(cfg_xml).channels()
+        channels  = BgpChannelParser(cfg_xml).channels(only_groups=PARSED_BGP_GROUPS)
         ch        = next((c for c in channels if c.neighbor == reserve.address), None)
         source_ip = ch.local_address if ch else None
         try:

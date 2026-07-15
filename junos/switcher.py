@@ -123,11 +123,21 @@ class BgpPolicySwitcher:
     def __init__(self, config_xml) -> None:
         self.root = self._strip_ns(config_xml)
 
-    def channels(self, priority_groups: tuple[str, ...] = ()) -> list[BgpChannel]:
+    def channels(
+        self,
+        priority_groups: tuple[str, ...] = (),
+        only_groups:     tuple[str, ...] = (),
+    ) -> list[BgpChannel]:
         """
-        Полный список каналов связи по ВСЕМ BGP-группам конфига:
-        группа, IP соседа, описание, группы префиксов import/export и
-        приоритет из суффикса -P<n> имён политик.
+        Список каналов связи по BGP-группам конфига: группа, IP соседа,
+        описание, группы префиксов import/export и приоритет из суффикса
+        -P<n> имён политик.
+
+        only_groups — если задано, обрабатываются ТОЛЬКО перечисленные
+        группы, остальные полностью игнорируются на уровне парсинга (см.
+        const.PARSED_BGP_GROUPS) — временная мера против шума/ложных
+        срабатываний от групп, которые пока не должны участвовать в
+        диагностике. Пусто — без ограничения, обрабатываются все группы.
 
         priority_groups — группы в порядке убывания приоритета (напр.
         ("DC-MOSCOW",)): их каналы получают меньший group_rank и стоят
@@ -140,6 +150,8 @@ class BgpPolicySwitcher:
         for grp in self.root.iter("group"):
             group_name = self._text(grp, "name")
             if not group_name:
+                continue
+            if only_groups and group_name not in only_groups:
                 continue
             group_index.setdefault(group_name, len(group_index))
             if group_name in priority_groups:
