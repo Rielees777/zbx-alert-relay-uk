@@ -4,7 +4,16 @@ mailer.py — отправка обращений оператору связи 
 
 Дополняет уведомление в чат (notifier.py): по тому же инциденту формирует
 письмо оператору по шаблону обращения и шлёт его на email провайдера через
-внешний mail-service (POST {MAIL_SERVICE_URL}/emails/{MAILBOX}/send).
+внешний mail-service (POST {MAIL_SERVICE_URL}/emails/{MAILBOX}/send-notification).
+
+У mail-service (Rielees777/mail-service) для отправки есть два разных
+эндпоинта: POST /emails/{mailbox}/send с полем "body" — тело уходит в
+exchangelib как обычный текст, HTML-разметка в нём НЕ рендерится, показывается
+буквально тегами; и POST /emails/{mailbox}/send-notification с полем
+"body_html" — на бэкенде оборачивается в exchangelib.HTMLBody(...) и
+рендерится как настоящий HTML. Раньше письма шли первым способом (поэтому
+попытка HTML-письма показывала голые теги); теперь — вторым, через
+_text_to_html().
 
 Адрес получателя: сначала PROVIDER_EMAILS[провайдер] (const.py), где провайдер
 берётся из сматченного канала Pyrus; если провайдера там нет — на запасной
@@ -16,6 +25,7 @@ Settings.mail_to_default. Если ни того, ни другого — пис
 
 from __future__ import annotations
 
+import html as html_lib
 import logging
 
 import requests
@@ -146,6 +156,23 @@ def build_reserve_unavailable_email(report: IncidentReport) -> tuple[str, str]:
     return subject, body
 
 
+def _text_to_html(body: str) -> str:
+    """
+    Простая обёртка обычного текста (как собирают build_*_email выше,
+    строки разделены \\r\\n) в HTML для отправки через
+    /emails/{mailbox}/send-notification — единственный эндпоинт
+    mail-service, реально рендерящий HTML (см. модуль-докстринг). Перенос
+    строки → <br>, спецсимволы в динамических значениях (адрес, провайдер,
+    договор — из Pyrus/Zabbix) экранированы, чтобы не сломать разметку.
+
+    Когда появится официальный шаблон письма для провайдеров — эту функцию
+    можно будет заменить на генерацию по нему; сборка текста в build_*_email
+    и сама отправка (MailClient.send_html) при этом не меняются.
+    """
+    escaped = html_lib.escape(body).replace("\r\n", "<br>\n")
+    return f"<html><body><p>{escaped}</p></body></html>"
+
+
 def channel_email(report: IncidentReport) -> str | None:
     """
     Email провайдера из сматченного канала Pyrus (ChannelInfo.email, cell 52
@@ -178,7 +205,7 @@ def resolve_recipient(
 
 
 class MailClient:
-    """HTTP-клиент к mail-service (POST /emails/{mailbox}/send)."""
+    """HTTP-клиент к mail-service."""
 
     def __init__(self, settings) -> None:
         self._base_url = settings.mail_service_url.rstrip("/")
@@ -191,11 +218,37 @@ class MailClient:
         })
 
     def send(self, to_addr: str, subject: str, body: str, cc_addrs: list[str] | None = None) -> str:
+        """POST /emails/{mailbox}/send — тело как обычный текст (exchangelib
+        Body). Не используется для писем оператору (см. send_html), оставлен
+        как есть на случай, если понадобится именно plain-text отправка."""
         url = f"{self._base_url}/emails/{self._mailbox}/send"
         payload = {
             "to_recipients": [to_addr],
             "subject":       subject,
             "body":          body,
+        }
+        if cc_addrs:
+            payload["cc_recipients"] = cc_addrs
+        resp = self._session.post(url, json=payload, timeout=30)
+        resp.raise_for_status()
+        try:
+            return resp.json().get("message_id", "")
+        except ValueError:
+            return ""
+
+    def send_html(
+        self, to_addr: str, subject: str, body_html: str,
+        cc_addrs: list[str] | None = None, importance: str = "Normal",
+    ) -> str:
+        """POST /emails/{mailbox}/send-notification — тело как настоящий
+        HTML (exchangelib HTMLBody на бэкенде mail-service). Именно этим
+        методом отправляются письма оператору (см. send_provider_notification)."""
+        url = f"{self._base_url}/emails/{self._mailbox}/send-notification"
+        payload = {
+            "to_recipients": [to_addr],
+            "subject":       subject,
+            "body_html":     body_html,
+            "importance":    importance,
         }
         if cc_addrs:
             payload["cc_recipients"] = cc_addrs
@@ -264,7 +317,10 @@ def send_provider_notification(
     else:
         subject, body = build_provider_email(report)
     try:
-        message_id = MailClient(settings).send(to_addr, subject, body, cc_addrs=settings.mail_cc_list)
+        body_html   = _text_to_html(body)
+        message_id  = MailClient(settings).send_html(
+            to_addr, subject, body_html, cc_addrs=settings.mail_cc_list,
+        )
         logger.info("Письмо оператору отправлено на %s (копия: %s) (host=%s, message_id=%s)",
                     to_addr, settings.mail_cc_list or "—", report.problem.host_name, message_id)
         # Справочно: email провайдера из канала Pyrus (cell 52) — пока не
