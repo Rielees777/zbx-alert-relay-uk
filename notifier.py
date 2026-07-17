@@ -59,6 +59,16 @@ def _operator(report: IncidentReport, cod) -> str:
     return p.cod_name or "—"
 
 
+def _service(report: IncidentReport) -> str:
+    """Услуга канала (L2VPN/Интернет/Тёмное волокно/...) из Pyrus — не все
+    каналы вообще L2-транспорт, поэтому в текстах сообщений подставляется
+    реальная услуга, а не жёстко "L2VPN"."""
+    ch = report.pyrus_channel
+    if ch and ch.service:
+        return ch.service
+    return "L2VPN"
+
+
 def _utilization_str(util_pct: float | None) -> str:
     if util_pct is None:
         return "данные недоступны"
@@ -76,18 +86,19 @@ def format_degradation_message(report: IncidentReport) -> str:
     operator = _operator(report, cod)
     contract = _contract(report, cod)
     address  = p.host_name or "—"
+    service  = _service(report)
 
     loss_pct = _report_loss_pct(report)
     util_str = _utilization_str(report.utilization_pct)
 
     return (
-        f"Зафиксирована деградация на канале связи L2VPN. "
+        f"Зафиксирована деградация на канале связи {service}. "
         f"Прошу сформировать и направить обращение оператору связи {operator} "
         f"для проверки и устранения проблемы.\n"
         f"Диагностическая информация:\n"
         f"1. Адрес площадки: {address}\n"
         f"2. Идентификатор канала (номер договора): {contract}\n"
-        f"3. Результаты проверки L2VPN-транспорта:\n"
+        f"3. Результаты проверки транспорта:\n"
         f"   - Потери ICMP: {loss_pct:.0f}%\n"
         f"4. Утилизация канала в пике за период инцидента: {util_str}"
     )
@@ -100,15 +111,16 @@ def format_channel_down_message(report: IncidentReport) -> str:
     operator = _operator(report, cod)
     contract = _contract(report, cod)
     address  = p.host_name or "—"
+    service  = _service(report)
 
     return (
-        f"Канал связи L2VPN полностью недоступен (потери ICMP 100%).\n"
+        f"Канал связи {service} полностью недоступен (потери ICMP 100%).\n"
         f"Прошу сформировать и направить обращение оператору связи {operator} "
         f"для проверки и устранения проблемы.\n"
         f"Диагностическая информация:\n"
         f"1. Адрес площадки: {address}\n"
         f"2. Идентификатор канала (номер договора): {contract}\n"
-        f"3. Результаты проверки L2VPN-транспорта:\n"
+        f"3. Результаты проверки транспорта:\n"
         f"   - Потери ICMP: 100% (канал недоступен)"
     )
 
@@ -126,18 +138,19 @@ def format_site_degradation_message(report: IncidentReport) -> str:
     operator = _operator(report, cod)
     contract = _contract(report, cod)
     address  = p.host_name or "—"
+    service  = _service(report)
 
     loss_pct = _report_loss_pct(report)
     util_str = _utilization_str(report.utilization_pct)
 
     return (
-        f"Зафиксирована деградация на канале связи L2VPN. "
+        f"Зафиксирована деградация на канале связи {service}. "
         f"Прошу сформировать и направить обращение оператору связи {operator} "
         f"для проверки и устранения проблемы.\n"
         f"Диагностическая информация:\n"
         f"1. Адрес площадки: {address}\n"
         f"2. Идентификатор канала (номер договора): {contract}\n"
-        f"3. Результаты проверки L2VPN-транспорта:\n"
+        f"3. Результаты проверки транспорта:\n"
         f"   - Потери ICMP: {loss_pct:.0f}%\n"
         f"4. Утилизация канала в пике за период инцидента: {util_str}"
     )
@@ -150,15 +163,16 @@ def format_site_channel_down_message(report: IncidentReport) -> str:
     operator = _operator(report, cod)
     contract = _contract(report, cod)
     address  = p.host_name or "—"
+    service  = _service(report)
 
     return (
-        f"Канал связи L2VPN полностью недоступен (потери ICMP 100%).\n"
+        f"Канал связи {service} полностью недоступен (потери ICMP 100%).\n"
         f"Прошу сформировать и направить обращение оператору связи {operator} "
         f"для проверки и устранения проблемы.\n"
         f"Диагностическая информация:\n"
         f"1. Адрес площадки: {address}\n"
         f"2. Идентификатор канала (номер договора): {contract}\n"
-        f"3. Результаты проверки L2VPN-транспорта:\n"
+        f"3. Результаты проверки транспорта:\n"
         f"   - Потери ICMP: 100% (канал недоступен)"
     )
 
@@ -176,17 +190,19 @@ def format_reserve_unavailable_message(report: IncidentReport) -> str:
     reserve = report.pyrus_channel
     primary_operator = (primary.provider if primary and primary.provider else None) or "—"
     primary_contract = (primary.contract if primary and primary.contract else None) or "—"
+    primary_service  = (primary.service if primary and primary.service else None) or "L2VPN"
     reserve_operator = (reserve.provider if reserve and reserve.provider else None) or "—"
     reserve_contract = (reserve.contract if reserve and reserve.contract else None) or "—"
+    reserve_service  = (reserve.service if reserve and reserve.service else None) or "L2VPN"
 
     return (
-        f"Зафиксирована недоступность ОСНОВНОГО И РЕЗЕРВНОГО каналов связи L2VPN "
+        f"Зафиксирована недоступность ОСНОВНОГО И РЕЗЕРВНОГО каналов связи "
         f"площадки. Автоматическое переключение на резерв невозможно — резервный "
         f"канал сам недоступен. Требуется ручное вмешательство.\n"
         f"Диагностическая информация:\n"
         f"1. Адрес площадки: {address}\n"
-        f"2. Основной канал: оператор {primary_operator}, договор {primary_contract}\n"
-        f"3. Резервный канал: оператор {reserve_operator}, договор {reserve_contract}"
+        f"2. Основной канал: услуга {primary_service}, оператор {primary_operator}, договор {primary_contract}\n"
+        f"3. Резервный канал: услуга {reserve_service}, оператор {reserve_operator}, договор {reserve_contract}"
     )
 
 

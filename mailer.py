@@ -22,7 +22,7 @@ import requests
 
 from const import get_cod_by_name, get_provider_email
 from models import IncidentDecision, IncidentReport
-from notifier import _contract, _operator, _report_loss_pct
+from notifier import _contract, _operator, _report_loss_pct, _service
 from providers import extract_email
 
 logger = logging.getLogger(__name__)
@@ -33,13 +33,6 @@ def _address(report: IncidentReport) -> str:
     if site and site.address:
         return site.address
     return report.problem.host_name or "—"
-
-
-def _service(report: IncidentReport) -> str:
-    ch = report.pyrus_channel
-    if ch and ch.service:
-        return ch.service
-    return "L2VPN"
 
 
 def build_provider_email(report: IncidentReport) -> tuple[str, str]:
@@ -66,7 +59,7 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
     lines = [
         f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
         f"Договор: {contract}",
-        f"Результаты проверки L2VPN-транспорта:",
+        f"Результаты проверки транспорта:",
         loss_line,
     ]
     # Канал полностью недоступен — утилизация тут ни при чём (нечего мерить),
@@ -109,7 +102,7 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
     lines = [
         f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
         f"Договор: {contract}",
-        f"Результаты проверки L2VPN-транспорта:",
+        f"Результаты проверки транспорта:",
         loss_line,
     ]
     if not channel_down:
