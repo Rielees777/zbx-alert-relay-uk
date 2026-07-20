@@ -21,8 +21,12 @@ from trigger_parser import provider_from_description
 logger = logging.getLogger(__name__)
 
 
-def run(zabbix_api, junos_api, matcher=None, skip_eventids: frozenset[str] = frozenset()) -> list[IncidentReport]:
-    problems = _collect_problems(zabbix_api, skip_eventids)
+def run(zabbix_api, junos_api, matcher=None, skip_eventids: frozenset[str] = frozenset(),
+        process_decider=None) -> list[IncidentReport]:
+    # process_decider — ДОРМАНТНО (см. scheduler.check_rpm): при None поведение
+    # прежнее (отсечка по skip_eventids); при заданном предикате учитывается
+    # верхняя граница возраста и повторная отправка.
+    problems = _collect_problems(zabbix_api, skip_eventids, process_decider)
     if not problems:
         logger.debug("Активных RPM-проблем для обработки не найдено.")
         return []
@@ -54,6 +58,7 @@ def _in_allowed_network(ip: str | None) -> bool:
 def _collect_problems(
     zabbix_api,
     skip_eventids: frozenset[str] = frozenset(),
+    process_decider=None,
 ) -> list[RpmProblem]:
     seen:   set[str]         = set()
     result: list[RpmProblem] = []
@@ -87,7 +92,18 @@ def _collect_problems(
                 continue
             # Уже отработанный инцидент (письмо направлено) — больше не
             # реагируем: ни junos-проверок, ни сообщений.
-            if p.eventid in skip_eventids:
+            #
+            # process_decider (ДОРМАНТНО, пока не передаётся — инструкция
+            # подключения в scheduler.check_rpm): единый предикат
+            # (eventid, started) -> bool «обрабатывать ли», учитывающий верхнюю
+            # границу возраста (MAX_ALERT_AGE_SEC) и повторную отправку
+            # (RESEND_AFTER_SEC). Когда задан — заменяет собой отсечку по
+            # skip_eventids; когда None — боевое поведение как раньше.
+            if process_decider is not None:
+                if not process_decider(p.eventid, p.started):
+                    logger.debug("Инцидент %s отсечён по возрасту/повтору — пропуск", p.eventid)
+                    continue
+            elif p.eventid in skip_eventids:
                 logger.debug("Инцидент %s уже отработан — пропуск", p.eventid)
                 continue
             if p.eventid not in seen:

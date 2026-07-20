@@ -18,7 +18,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pipeline
 from bot import Bot
 from config import Settings
-from const import CHECK_INTERVAL_MINUTES
+from const import CHECK_INTERVAL_MINUTES, MAX_ALERT_AGE_SEC, RESEND_AFTER_SEC
 from db import get_connection, load_sites
 from emulator import load_emulated_apis
 from junos import JunosApi
@@ -85,6 +85,36 @@ class SentRegistry:
     def snapshot(self) -> frozenset[str]:
         return frozenset(self._sent)
 
+    def should_process(self, eventid: str, started: int, now: float | None = None) -> bool:
+        """
+        ДОРМАНТНЫЙ хелпер (в боевом пути пока НЕ вызывается — инструкция
+        подключения в check_rpm). Единое решение «обрабатывать ли алерт» с
+        учётом верхней границы возраста и повторной отправки:
+
+          • инцидент уже отработан (есть отметка): обрабатываем повторно ТОЛЬКО
+            если с последней отправки прошло >= RESEND_AFTER_SEC (алерт всё ещё
+            открыт — иначе Zabbix его бы закрыл и он сюда не попал). На возраст
+            при этом НЕ смотрим — это напоминание о зависшей проблеме;
+          • инцидент ещё не отработан (отметки нет): обрабатываем, если он не
+            старше MAX_ALERT_AGE_SEC. Более старый первичный алерт
+            («залежавшийся») пропускаем.
+
+        started — problem.started (Zabbix clock, unix-время начала проблемы).
+
+        ВНИМАНИЕ при подключении: TTL реестра (ttl_sec) должен быть НЕ меньше
+        RESEND_AFTER_SEC (лучше с запасом), иначе отметка отработанного
+        инцидента будет вычищена purge() раньше, чем наступит повторная
+        отправка, и старый алерт ошибочно сочтётся первичным и будет отсечён
+        по верхней границе возраста.
+        """
+        now = time.time() if now is None else now
+        marked = self._sent.get(eventid)
+        if marked is not None:                       # уже уведомляли
+            return (now - marked) >= RESEND_AFTER_SEC
+        if MAX_ALERT_AGE_SEC is not None and (now - started) > MAX_ALERT_AGE_SEC:
+            return False                             # первичный, но «залежавшийся»
+        return True
+
 
 class MatcherRef:
     """Изменяемая ссылка на текущий RegistryMatcher. check_rpm получает её
@@ -115,18 +145,22 @@ def _build_matcher(settings: Settings) -> RegistryMatcher | None:
 
 
 def _sync_pipeline(
-    settings:      Settings,
-    matcher:       RegistryMatcher | None,
-    skip_eventids: frozenset[str],
+    settings:        Settings,
+    matcher:         RegistryMatcher | None,
+    skip_eventids:   frozenset[str],
+    process_decider=None,   # ДОРМАНТНО: None → боевое поведение (отсечка только
+                            # по skip_eventids). Передайте sent.should_process,
+                            # чтобы включить верхнюю границу возраста + повтор.
 ) -> list[IncidentReport]:
     if EMULATOR_FIXTURE:
         zapi, junos, fixture_matcher = load_emulated_apis(EMULATOR_FIXTURE)
         return pipeline.run(zapi, junos,
                             fixture_matcher if fixture_matcher is not None else matcher,
-                            skip_eventids=skip_eventids)
+                            skip_eventids=skip_eventids, process_decider=process_decider)
     with ZabbixApi(settings.zabbix_config()) as zapi:
         junos = JunosApi(settings)
-        return pipeline.run(zapi, junos, matcher, skip_eventids=skip_eventids)
+        return pipeline.run(zapi, junos, matcher, skip_eventids=skip_eventids,
+                            process_decider=process_decider)
 
 
 async def run_pyrus_sync(settings: Settings, matcher_ref: MatcherRef) -> None:
@@ -160,6 +194,22 @@ async def check_rpm(
     try:
         # Уже отработанные инциденты отсекаются на входе пайплайна —
         # для них не выполняются ни junos-проверки, ни уведомления.
+        #
+        # ── КАК ПОДКЛЮЧИТЬ верхнюю границу возраста + повторную отправку ──────
+        # Сейчас выключено: действует только отсечка уже отработанных через
+        # sent.snapshot(); MAX_ALERT_AGE_SEC/RESEND_AFTER_SEC в боевом пути не
+        # применяются, повтор происходит неявно по TTL реестра. Чтобы включить:
+        #   1) в main() создайте реестр с TTL не меньше RESEND_AFTER_SEC (с
+        #      запасом), напр. SentRegistry(ttl_sec=RESEND_AFTER_SEC + 24*3600)
+        #      — отметка обязана дожить до момента повторной отправки;
+        #   2) замените вызов ниже на передачу предиката should_process:
+        #        reports = await asyncio.to_thread(
+        #            _sync_pipeline, settings, matcher_ref.value,
+        #            sent.snapshot(), sent.should_process)
+        #      (parameter process_decider уже проброшен в _sync_pipeline →
+        #      pipeline.run → _collect_problems; когда он задан, заменяет собой
+        #      отсечку по skip_eventids и учитывает возраст/повтор per-event).
+        # ─────────────────────────────────────────────────────────────────────
         reports = await asyncio.to_thread(_sync_pipeline, settings, matcher_ref.value, sent.snapshot())
     except Exception as exc:
         logger.error("Ошибка выполнения pipeline: %s", exc)
