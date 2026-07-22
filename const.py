@@ -115,14 +115,23 @@ class COD:
     name:     str = ""
     operator: str = ""
     contract: str = ""
+    # Псевдоним ЦОДа для сверки с реестром каналов связи. Нужен, чтобы
+    # различать два канала ОДНОГО провайдера, идущие в РАЗНЫЕ ЦОДы: по имени
+    # провайдера они неотличимы, развести можно только по ЦОДу, а он
+    # присутствует в description канала. Сюда вручную вписывается адрес/
+    # обозначение ЦОДа так, как оно встречается в реестре, — по нему потом
+    # сверяется, к какому ЦОДу относится канал. Пусто = сверка по этому ЦОДу
+    # пока не настроена. (Само сопоставление ещё не подключено — это только
+    # поле-слот под заполнение адресами.)
+    alias:    str = ""
 
 
 @dataclass(frozen=True)
 class CODs:
-    o2:  COD = COD("10.70.145.2",   "o2",  operator="", contract="")
-    ix:  COD = COD("10.70.145.101", "ix",  operator="", contract="")
-    n11: COD = COD("10.70.138.51",  "n11", operator="", contract="")
-    m1:  COD = COD("10.70.138.50",  "m1",  operator="", contract="")
+    o2:  COD = COD("10.70.145.2",   "o2",  operator="", contract="", alias="")
+    ix:  COD = COD("10.70.145.101", "ix",  operator="", contract="", alias="")
+    n11: COD = COD("10.70.138.51",  "n11", operator="", contract="", alias="")
+    m1:  COD = COD("10.70.138.50",  "m1",  operator="", contract="", alias="")
 
 
 def get_cod_by_name(name: str | None) -> COD | None:
