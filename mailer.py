@@ -32,7 +32,14 @@ import requests
 
 from const import get_cod_by_name, get_provider_email
 from models import IncidentDecision, IncidentReport
-from notifier import _channel_id, _contract, _operator, _report_loss_pct, _service
+from notifier import (
+    _bandwidth_mbps,
+    _channel_id,
+    _contract,
+    _operator,
+    _report_loss_pct,
+    _service,
+)
 from providers import extract_email
 
 logger = logging.getLogger(__name__)
@@ -71,6 +78,11 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
         f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
         f"Идентификатор канала: {channel_id}",
         f"Договор: {contract}",
+    ]
+    bw = _bandwidth_mbps(report)
+    if bw:
+        lines.append(f"Полоса канала: {bw}")
+    lines += [
         f"Результаты проверки транспорта:",
         loss_line,
     ]
@@ -116,6 +128,11 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
         f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
         f"Идентификатор канала: {channel_id}",
         f"Договор: {contract}",
+    ]
+    bw = _bandwidth_mbps(report)
+    if bw:
+        lines.append(f"Полоса канала: {bw}")
+    lines += [
         f"Результаты проверки транспорта:",
         loss_line,
     ]

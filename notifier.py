@@ -77,6 +77,19 @@ def _channel_id(report: IncidentReport) -> str:
     return ch.channel_id if ch and ch.channel_id else "—"
 
 
+def _bandwidth_mbps(report: IncidentReport) -> str | None:
+    """Номинальная полоса канала из реестра Pyrus (ChannelInfo.bandwidth,
+    в Кбит/с) в человекочитаемом виде «N Мбит/с». База конверсии — ÷1024
+    (76800 Кбит/с → 75 Мбит/с). None, если ширина в реестре не указана —
+    тогда строку про полосу в сообщение/письмо не добавляем."""
+    ch = report.pyrus_channel
+    if not ch or not ch.bandwidth:
+        return None
+    mbps = ch.bandwidth / 1024
+    text = f"{mbps:.0f}" if abs(mbps - round(mbps)) < 0.05 else f"{mbps:.1f}"
+    return f"{text} Мбит/с"
+
+
 def _problem_interface_desc(report: IncidentReport) -> str | None:
     """Интерфейс с проблемой и его описание — для сообщения мониторингу, чтобы
     дежурный сразу видел, где именно обнаружены потери. Берём degraded_link
@@ -136,6 +149,9 @@ def _degradation_items(report: IncidentReport) -> list[str]:
         f"Идентификатор канала: {_channel_id(report)}",
         f"Номер договора: {_contract(report, cod)}",
     ]
+    bw = _bandwidth_mbps(report)
+    if bw:
+        items.append(f"Полоса канала: {bw}")
     iface = _problem_interface_desc(report)
     if iface:
         items.append(f"Интерфейс с проблемой: {iface}")
@@ -158,6 +174,9 @@ def _channel_down_items(report: IncidentReport) -> list[str]:
         f"Идентификатор канала: {_channel_id(report)}",
         f"Номер договора: {_contract(report, cod)}",
     ]
+    bw = _bandwidth_mbps(report)
+    if bw:
+        items.append(f"Полоса канала: {bw}")
     iface = _problem_interface_desc(report)
     if iface:
         items.append(f"Интерфейс с проблемой: {iface}")
@@ -274,9 +293,15 @@ def build_flapping_message(report: IncidentReport, count: int,
         f"Оператор связи: {_operator(report, cod)}",
         f"Эпизодов потерь за последние {window_hours} ч: {count}",
     ]
+    extra = []
+    bw = _bandwidth_mbps(report)
+    if bw:
+        extra.append(f"Полоса канала: {bw}")
     iface = _problem_interface_desc(report)
     if iface:
-        items.insert(4, f"Интерфейс с проблемой: {iface}")
+        extra.append(f"Интерфейс с проблемой: {iface}")
+    for offset, line in enumerate(extra):
+        items.insert(4 + offset, line)
     return (
         f"⚠ Канал связи {_service(report)} нестабилен (флапает): периодические "
         f"потери с разными интервалами. Обращение оператору по каждому эпизоду "
