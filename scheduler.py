@@ -18,14 +18,20 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pipeline
 from bot import Bot
 from config import Settings
-from const import CHECK_INTERVAL_MINUTES, MAX_ALERT_AGE_SEC, RESEND_AFTER_SEC
+from const import (
+    CHECK_INTERVAL_MINUTES,
+    FLAP_ALERT_THRESHOLD,
+    FLAP_WINDOW_SEC,
+    MAX_ALERT_AGE_SEC,
+    RESEND_AFTER_SEC,
+)
 from db import get_connection, load_sites
 from emulator import load_emulated_apis
 from junos import JunosApi
-from mailer import send_provider_notification
+from mailer import is_provider_mail_expected, send_provider_notification
 from matcher import RegistryMatcher
-from models import IncidentReport
-from notifier import build_notification, create_bot, send_notification
+from models import IncidentDecision, IncidentReport
+from notifier import build_flapping_message, build_notification, create_bot, send_notification
 from pyrus_sync import sync_registry
 from report import print_incident_reports
 from zabbix import ZabbixApi
@@ -116,6 +122,62 @@ class SentRegistry:
         return True
 
 
+def channel_flap_key(problem) -> str:
+    """Ключ канала для антиспам-окна флапа: узел + идентификатор канала из
+    триггера (channel_spec). Для site-алертов channel_spec может отсутствовать
+    — тогда ключуемся по имени площадки, чтобы флапы одной площадки собрались
+    вместе."""
+    spec = problem.channel_spec or (f"site:{problem.host_name or ''}"
+                                    if problem.site_alert else "?")
+    return f"{problem.host_tech}|{spec}"
+
+
+class ChannelFlapRegistry:
+    """
+    Антиспам флапающих каналов. После того как по каналу направлено обращение
+    оператору (register_sent), повторные проблемы того же канала в течение
+    `window_sec` НЕ порождают новых писем/сообщений — они считаются
+    (record_repeat); когда счётчик пришедших алертов превысит `threshold`,
+    record_repeat один раз возвращает True — сигнал отправить в чат сообщение
+    о нестабильном канале. Ключ — channel_flap_key(problem). Состояние
+    in-memory (как у SentRegistry): при рестарте окна сбрасываются.
+    """
+
+    def __init__(self, window_sec: int, threshold: int) -> None:
+        self._window = window_sec
+        self._threshold = threshold
+        # key -> {"start": float, "count": int, "flap_sent": bool}
+        self._state: dict[str, dict] = {}
+
+    def purge(self, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        self._state = {
+            k: st for k, st in self._state.items()
+            if now - st["start"] < self._window
+        }
+
+    def within_window(self, key: str, now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        st = self._state.get(key)
+        return st is not None and (now - st["start"]) < self._window
+
+    def register_sent(self, key: str, now: float | None = None) -> None:
+        """Открыть новое окно (по каналу только что направлено письмо)."""
+        now = time.time() if now is None else now
+        self._state[key] = {"start": now, "count": 1, "flap_sent": False}
+
+    def record_repeat(self, key: str) -> tuple[int, bool]:
+        """Учесть повторный алерт в открытом окне. Возвращает (счётчик,
+        нужно_ли_отправить_сообщение_о_флапе) — второй True ровно один раз,
+        когда счётчик впервые превышает threshold."""
+        st = self._state[key]
+        st["count"] += 1
+        emit = st["count"] > self._threshold and not st["flap_sent"]
+        if emit:
+            st["flap_sent"] = True
+        return st["count"], emit
+
+
 class MatcherRef:
     """Изменяемая ссылка на текущий RegistryMatcher. check_rpm получает её
     один раз при старте планировщика; run_pyrus_sync подменяет .value после
@@ -188,9 +250,11 @@ async def check_rpm(
     bot:         Bot,
     matcher_ref: MatcherRef,
     sent:        SentRegistry,
+    flaps:       ChannelFlapRegistry,
 ) -> None:
     logger.debug("▶ Запуск RPM-проверки")
     sent.purge()
+    flaps.purge()
     try:
         # Уже отработанные инциденты отсекаются на входе пайплайна —
         # для них не выполняются ни junos-проверки, ни уведомления.
@@ -226,21 +290,66 @@ async def check_rpm(
         logger.warning("BOT_CHAT_ID не задан — уведомления не отправляются.")
         return
 
-    new_msgs = 0
+    new_msgs  = 0
+    flap_msgs = 0
     for report in reports:
-        msg = build_notification(report)
-        if not msg:
+        # Есть ли вообще что сообщать по этому решению (перегрузка/деградация/
+        # обрыв/эскалация). Если нет (ложное срабатывание, IPSEC, ошибка) —
+        # инцидент не уведомляется и в антиспам-окно флапа не попадает.
+        if build_notification(report) is None:
             continue
+
+        key = channel_flap_key(report.problem)
+
+        # Эскалация RESERVE_UNAVAILABLE исключена из флап-подавления: недоступны
+        # ОБА канала (нужно ручное вмешательство), и в сценарии эскалации она
+        # приходит тем же циклом и с тем же ключом канала, что и основной отчёт
+        # — тот успел бы открыть окно и заглушить эскалацию. Такое событие
+        # всегда отправляем и в антиспам-окно не заводим.
+        is_escalation = report.decision == IncidentDecision.RESERVE_UNAVAILABLE
+
+        # Антиспам флапа: по каналу уже направлено обращение оператору и с тех
+        # пор не прошли сутки — новых писем/сообщений не создаём, только считаем
+        # эпизоды; при превышении порога один раз шлём в чат сообщение о
+        # нестабильном канале.
+        if not is_escalation and flaps.within_window(key):
+            count, emit_flap = flaps.record_repeat(key)
+            if emit_flap:
+                await send_notification(bot, chat_id, build_flapping_message(
+                    report, count, window_hours=FLAP_WINDOW_SEC // 3600))
+                flap_msgs += 1
+                logger.info("Канал %s флапает: %d эпизодов за окно — сообщение о "
+                            "нестабильности отправлено", key, count)
+            else:
+                logger.info("Канал %s: повторный алерт в антиспам-окне (эпизод "
+                            "%d) — письмо/сообщение подавлены", key, count)
+            # Тот же eventid не должен считаться повторно на каждом цикле, пока
+            # проблема открыта — помечаем как отработанный.
+            sent.mark(report.problem.eventid)
+            continue
+
+        # Первичная реакция по каналу: сначала письмо оператору (чтобы в
+        # сообщение мониторингу подставить факт его отправки), затем чат.
+        email_sent: bool | None = None
+        if is_provider_mail_expected(settings, report):
+            email_sent = await asyncio.to_thread(send_provider_notification, settings, report)
+
+        msg = build_notification(report, provider_email_sent=email_sent)
         await send_notification(bot, chat_id, msg)
-        # Письмо оператору напрямую (инертно, пока не заданы MAIL_* в config).
-        await asyncio.to_thread(send_provider_notification, settings, report)
-        # Инцидент отработан: сообщение мониторингу и письмо оператору
-        # направлены — больше на этот eventid не реагируем.
+
+        # Окно антиспама открываем только если письмо оператору реально ушло —
+        # именно оно «якорит» сутки подавления повторов (см. требование).
+        # Эскалацию в окно не заводим, чтобы она не сбрасывала счётчик флапа
+        # основного канала (ключ у них общий).
+        if email_sent and not is_escalation:
+            flaps.register_sent(key)
+
+        # Инцидент отработан: больше на этот eventid не реагируем.
         sent.mark(report.problem.eventid)
         new_msgs += 1
 
-    logger.info("◀ RPM-проверка завершена (%d инцидент(ов), новых сообщений: %d)",
-                len(reports), new_msgs)
+    logger.info("◀ RPM-проверка завершена (%d инцидент(ов), новых сообщений: %d, "
+                "сообщений о флапе: %d)", len(reports), new_msgs, flap_msgs)
 
 
 async def main() -> None:
@@ -293,12 +402,17 @@ async def main() -> None:
     # незакрытый инцидент уведомлялся бы повторно после очистки отметки.
     sent = SentRegistry(ttl_sec=7 * 24 * 3600)
 
+    # Антиспам флапающих каналов: после письма оператору повторные проблемы
+    # того же канала за сутки подавляются и считаются; при > FLAP_ALERT_THRESHOLD
+    # эпизодах — одно сообщение о нестабильном канале в чат (см. check_rpm).
+    flaps = ChannelFlapRegistry(window_sec=FLAP_WINDOW_SEC, threshold=FLAP_ALERT_THRESHOLD)
+
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         check_rpm,
         trigger="interval",
         minutes=CHECK_INTERVAL_MINUTES,
-        args=[settings, bot, matcher_ref, sent],
+        args=[settings, bot, matcher_ref, sent, flaps],
         id="rpm_check",
         max_instances=1,
         coalesce=True,
@@ -322,7 +436,7 @@ async def main() -> None:
         CHECK_INTERVAL_MINUTES, settings.pyrus_sync_hour, settings.pyrus_sync_minute,
     )
 
-    await check_rpm(settings, bot, matcher_ref, sent)  # немедленный первый запуск
+    await check_rpm(settings, bot, matcher_ref, sent, flaps)  # немедленный первый запуск
 
     try:
         await asyncio.Event().wait()

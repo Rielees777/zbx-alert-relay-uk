@@ -32,7 +32,7 @@ import requests
 
 from const import get_cod_by_name, get_provider_email
 from models import IncidentDecision, IncidentReport
-from notifier import _contract, _operator, _report_loss_pct, _service
+from notifier import _channel_id, _contract, _operator, _report_loss_pct, _service
 from providers import extract_email
 
 logger = logging.getLogger(__name__)
@@ -56,9 +56,10 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
-    contract = _contract(report, cod)
-    address  = _address(report)
-    service  = _service(report)
+    contract   = _contract(report, cod)
+    address    = _address(report)
+    service    = _service(report)
+    channel_id = _channel_id(report)
 
     channel_down = report.decision == IncidentDecision.CHANNEL_DOWN
     if channel_down:
@@ -68,6 +69,7 @@ def build_provider_email(report: IncidentReport) -> tuple[str, str]:
 
     lines = [
         f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
+        f"Идентификатор канала: {channel_id}",
         f"Договор: {contract}",
         f"Результаты проверки транспорта:",
         loss_line,
@@ -99,9 +101,10 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
     p   = report.problem
     cod = get_cod_by_name(p.cod_name)
 
-    contract = _contract(report, cod)
-    address  = _address(report)
-    service  = _service(report)
+    contract   = _contract(report, cod)
+    address    = _address(report)
+    service    = _service(report)
+    channel_id = _channel_id(report)
 
     channel_down = report.decision == IncidentDecision.CHANNEL_DOWN
     if channel_down:
@@ -111,6 +114,7 @@ def build_site_provider_email(report: IncidentReport) -> tuple[str, str]:
 
     lines = [
         f"Здравствуйте! Наблюдаются проблема по адресу: {address}. Услуга {service}.",
+        f"Идентификатор канала: {channel_id}",
         f"Договор: {contract}",
         f"Результаты проверки транспорта:",
         loss_line,
@@ -142,11 +146,13 @@ def build_reserve_unavailable_email(report: IncidentReport) -> tuple[str, str]:
     address = _address(report)
     service = _service(report)
     ch      = report.pyrus_channel   # резервный канал
-    contract = ch.contract if ch and ch.contract else "—"
+    contract   = ch.contract   if ch and ch.contract   else "—"
+    channel_id = ch.channel_id if ch and ch.channel_id else "—"
 
     lines = [
         f"Здравствуйте! Наблюдается недоступность канала связи (резервного) по адресу: {address}. "
         f"Услуга {service}.",
+        f"Идентификатор канала: {channel_id}",
         f"Договор: {contract}",
         "Канал недоступен (потери ICMP 100%).",
         "Просим взять в работу.",
@@ -267,6 +273,15 @@ _MAILABLE_DECISIONS = frozenset({
     IncidentDecision.DEGRADED_CHANNEL,
     IncidentDecision.RESERVE_UNAVAILABLE,
 })
+
+
+def is_provider_mail_expected(settings, report: IncidentReport) -> bool:
+    """True, если по этому инциденту ПРЕДПОЛАГАЕТСЯ письмо оператору (почта
+    включена и decision из числа mailable). Нужно сообщению мониторингу,
+    чтобы отличать «письмо не предполагалось» (напр. перегрузка — статус
+    None, строку про письмо не пишем) от «пытались отправить, но не ушло»
+    (False)."""
+    return bool(settings.mail_enabled) and report.decision in _MAILABLE_DECISIONS
 
 
 def send_provider_notification(
