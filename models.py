@@ -89,6 +89,11 @@ class ChannelInfo(BaseModel):
     ip_address: str | None = None
     service:    str | None = None   # услуга: Интернет / L2VPN / Тёмное волокно / P2P (cell 49)
     email:      str | None = None   # email техподдержки провайдера (cell 52)
+    # Адрес ЦОДа (гео), cell 48 — нужен, чтобы различать два канала ОДНОГО
+    # провайдера, идущие в РАЗНЫЕ ЦОДы (по имени провайдера они неотличимы).
+    # Сверяется с COD.alias (const.py) — сама сверка ещё не подключена, это
+    # только парсинг и хранение значения.
+    cod_address: str | None = None
 
 
 class PyrusSite(BaseModel):

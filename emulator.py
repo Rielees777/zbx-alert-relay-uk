@@ -25,7 +25,7 @@ emulator.py — построение эмулированных Zabbix/Junos API
     { ...поля модели PyrusSite:
       task_id, directorate, zabbix_hostname, router_ip, address, city,
       channels: [ {provider, service, email, contract, bandwidth,
-                    channel_id, ip_address}, ... ]   // "дополнительные
+                    channel_id, ip_address, cod_address}, ... ]   // "доп.
                                                       // сервисы" канала —
                                                       // просто ещё элементы
                                                       // этого списка

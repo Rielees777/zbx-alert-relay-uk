@@ -88,6 +88,7 @@ class PyrusSiteParser:
                 bandwidth  = cls._cell_int(cells, cid=44),
                 contract   = cls._cell_text(cells, cid=46),
                 ip_address = cls._cell_text(cells, cid=47),
+                cod_address = cls._cell_text(cells, cid=48),
                 service    = cls._cell_choice(cells, cid=49),
                 email      = cls._cell_text(cells, cid=52),
             )
