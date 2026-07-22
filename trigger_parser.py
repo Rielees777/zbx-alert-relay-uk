@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 
+from const import get_cod_by_name
 from models import ChannelInfo, PyrusSite
 from providers import is_aliased, normalize_provider
 
@@ -173,6 +174,52 @@ def provider_from_description(description: str | None) -> str | None:
     return None
 
 
+def _extract_cod_node(description: str | None) -> str | None:
+    """Первый сегмент описания интерфейса ('n11-mts-l2vpn' → 'n11') —
+    условное имя ЦОДа, как в COD.name (const.py). Тот же формат, что и у
+    channel_spec ('m1-ttk-l2vpn'), поэтому применим и к channel_hint
+    (описание конкретного проблемного L2VPN-интерфейса с устройства)."""
+    if not description:
+        return None
+    first = description.strip().split("-", 1)[0].strip()
+    return first or None
+
+
+def _disambiguate_by_cod(candidates: list[ChannelInfo], node: str | None) -> ChannelInfo | None:
+    """
+    Различает несколько каналов ОДНОГО провайдера/услуги, идущих в РАЗНЫЕ
+    ЦОДы — по имени провайдера они неотличимы. Сверяет ChannelInfo.cod_address
+    (адрес ЦОДа из реестра Pyrus, cell 48) с COD.alias узла (const.py),
+    определённого по `node` ('m1'/'n11'/... из триггера/описания канала).
+
+    Возвращает канал, только если РОВНО ОДИН кандидат совпал по адресу ЦОДа —
+    при 0 совпадений (алиас/адрес ещё не заполнены или не сошлись) или
+    >1 совпадений неоднозначность не разрешается, вызывающий код остаётся
+    при прежнем поведении (первый по порядку).
+    """
+    if not node or len(candidates) < 2:
+        return None
+    cod = get_cod_by_name(node)
+    if not cod or not cod.alias:
+        return None
+    hits = [
+        ch for ch in candidates
+        if ch.cod_address and _addr_matches(ch.cod_address, cod.alias)
+    ]
+    if len(hits) == 1:
+        return hits[0]
+    return None
+
+
+def _addr_matches(cod_address: str, cod_alias: str) -> bool:
+    """Нестрогое сравнение адресов (без учёта пунктуации/пробелов/регистра,
+    как и TriggerInfo._normalize) — одно из значений может быть полным
+    адресом, другое сокращённым/частичным описанием того же места."""
+    a = TriggerInfo._normalize(cod_address)
+    b = TriggerInfo._normalize(cod_alias)
+    return bool(a) and bool(b) and (a in b or b in a)
+
+
 def find_channel_by_trigger(
     trigger_name: str,
     site: PyrusSite,
@@ -188,7 +235,11 @@ def find_channel_by_trigger(
          только этого провайдера. Для inet-триггеров провайдера нет.
       2. Тип канала из триггера сопоставляем с колонкой «Услуга»:
          l2vpn → «L2VPN», inet → «Интернет». Берём канал с этой услугой.
-      3. Если тип не указан — подставляем договор только при единственном
+      3. Если после этого каналов несколько (тот же провайдер и услуга,
+         но РАЗНЫЕ ЦОДы) — различаем по ЦОДу: COD.alias узла из триггера
+         сверяется с ChannelInfo.cod_address (см. _disambiguate_by_cod).
+         Не разрешилось однозначно — берём первый (как и раньше).
+      4. Если тип не указан — подставляем договор только при единственном
          подходящем канале (иначе выбор неоднозначен).
 
     Для site-триггеров дополнительно требуется совпадение имени площадки
@@ -230,6 +281,23 @@ def find_channel_by_trigger(
         hint_provider = provider_from_description(channel_hint)
         if hint_provider:
             by_provider = [ch for ch in typed if normalize_provider(ch.provider) == hint_provider]
+            if len(by_provider) > 1:
+                # Несколько L2VPN-каналов площадки одного провайдера (разные
+                # ЦОДы) — различаем по ЦОДу, как и для канальных алертов.
+                resolved = _disambiguate_by_cod(by_provider, _extract_cod_node(channel_hint))
+                if resolved:
+                    logger.debug(
+                        "find_channel_by_trigger: %d каналов провайдера %r различены по ЦОДу "
+                        "(из channel_hint=%r) → cod_address=%r",
+                        len(by_provider), hint_provider, channel_hint, resolved.cod_address,
+                    )
+                    return resolved
+                logger.warning(
+                    "find_channel_by_trigger: %d каналов провайдера %r неразличимы по ЦОДу "
+                    "(channel_hint=%r, COD.alias/ChannelInfo.cod_address не заполнены или не "
+                    "совпали) — беру первый по порядку, договор может оказаться неверным",
+                    len(by_provider), hint_provider, channel_hint,
+                )
             if by_provider:
                 logger.debug(
                     "find_channel_by_trigger: канал по описанию %r → провайдер %r → task:%d",
@@ -274,7 +342,27 @@ def find_channel_by_trigger(
                 "find_channel_by_trigger: нет канала со службой %r среди %r (после фильтра провайдера)",
                 want, [ch.service for ch in matches],
             )
-        return typed[0] if typed else None
+            return None
+        if len(typed) == 1:
+            return typed[0]
+
+        # 3. Несколько каналов одного провайдера/услуги — неотличимы по ним,
+        # различаем по ЦОДу (см. _disambiguate_by_cod).
+        resolved = _disambiguate_by_cod(typed, trigger.node)
+        if resolved:
+            logger.debug(
+                "find_channel_by_trigger: %d каналов провайдера %r услуги %r различены по ЦОДу "
+                "(node=%r) → cod_address=%r",
+                len(typed), trigger.provider, want, trigger.node, resolved.cod_address,
+            )
+            return resolved
+        logger.warning(
+            "find_channel_by_trigger: %d каналов провайдера %r услуги %r неразличимы по ЦОДу "
+            "(node=%r, COD.alias/ChannelInfo.cod_address не заполнены или не совпали) — "
+            "беру первый по порядку, договор может оказаться неверным",
+            len(typed), trigger.provider, want, trigger.node,
+        )
+        return typed[0]
 
     # 3. Тип не распознан — только если канал однозначен.
     if len(matches) != 1:
