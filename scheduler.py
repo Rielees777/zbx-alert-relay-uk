@@ -141,6 +141,13 @@ class ChannelFlapRegistry:
     record_repeat один раз возвращает True — сигнал отправить в чат сообщение
     о нестабильном канале. Ключ — channel_flap_key(problem). Состояние
     in-memory (как у SentRegistry): при рестарте окна сбрасываются.
+
+    Счётчик учитывается только `window_sec` (сутки, purge()) — но, помимо
+    этого, сбрасывается и досрочно при успешной синхронизации реестра Pyrus
+    (см. run_pyrus_sync/reset): реестр задач мог измениться (адреса,
+    договоры, состав каналов), поэтому копить счётчик по старым данным
+    дальше не имеет смысла — после обновления реестра канал заново
+    "открывает" себе окно антиспама с нуля при следующем инциденте.
     """
 
     def __init__(self, window_sec: int, threshold: int) -> None:
@@ -155,6 +162,16 @@ class ChannelFlapRegistry:
             k: st for k, st in self._state.items()
             if now - st["start"] < self._window
         }
+
+    def reset(self) -> None:
+        """Полный сброс всех окон/счётчиков — вызывается при успешной
+        синхронизации реестра Pyrus (см. run_pyrus_sync), независимо от
+        того, сколько времени оставалось до истечения window_sec."""
+        cleared = len(self._state)
+        self._state = {}
+        if cleared:
+            logger.info("Антиспам флапающих каналов сброшен (обновление реестра Pyrus): "
+                        "снято окон/счётчиков — %d", cleared)
 
     def within_window(self, key: str, now: float | None = None) -> bool:
         now = time.time() if now is None else now
@@ -225,10 +242,17 @@ def _sync_pipeline(
                             process_decider=process_decider)
 
 
-async def run_pyrus_sync(settings: Settings, matcher_ref: MatcherRef) -> None:
+async def run_pyrus_sync(
+    settings:    Settings,
+    matcher_ref: MatcherRef,
+    flaps:       ChannelFlapRegistry,
+) -> None:
     """Ежедневная задача планировщика: тянет реестр из Pyrus в pyrus_sites
     и, если что-то сохранилось, перестраивает matcher на свежих данных —
-    без этого обновление реестра подхватывалось бы только при рестарте."""
+    без этого обновление реестра подхватывалось бы только при рестарте.
+    Заодно сбрасывает антиспам-счётчики флапающих каналов (см.
+    ChannelFlapRegistry.reset) — реестр мог измениться, копить счётчик по
+    устаревшим данным смысла нет."""
     logger.info("▶ Запуск ежедневной синхронизации реестра Pyrus")
     try:
         saved = await asyncio.to_thread(sync_registry, settings)
@@ -243,6 +267,7 @@ async def run_pyrus_sync(settings: Settings, matcher_ref: MatcherRef) -> None:
     new_matcher = await asyncio.to_thread(_build_matcher, settings)
     if new_matcher is not None:
         matcher_ref.value = new_matcher
+    flaps.reset()
 
 
 async def check_rpm(
@@ -423,7 +448,7 @@ async def main() -> None:
         trigger="cron",
         hour=settings.pyrus_sync_hour,
         minute=settings.pyrus_sync_minute,
-        args=[settings, matcher_ref],
+        args=[settings, matcher_ref, flaps],
         id="pyrus_registry_sync",
         max_instances=1,
         coalesce=True,

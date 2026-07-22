@@ -261,8 +261,14 @@ def find_channel_by_trigger(
         return None
 
     # Site-триггер («Потери до <площадка>»): провайдера в имени нет —
-    # берём l2vpn-канал площадки (как и для канальных алертов, обрабатываем
-    # только L2VPN).
+    # берём l2vpn-канал площадки (как и для канальных алертов, приоритет —
+    # L2VPN). НО: у части площадок на устройстве вообще нет L2VPN-транспорта,
+    # только Интернет (RPM всё равно мониторит доступность площадки) — тогда
+    # Junos-диагностика L2VPN-линков ничего не находит, channel_hint всегда
+    # пуст, и без фолбэка ниже провайдер/договор/ID канала никогда бы не
+    # попадали в сообщение/письмо для таких площадок. Поэтому: если в
+    # реестре у площадки L2VPN-каналов нет вовсе — берём Интернет-каналы.
+    # Если L2VPN-каналы есть — поведение прежнее (Интернет игнорируется).
     if trigger.is_site:
         if not trigger.matches_visible_name(host_name):
             logger.warning(
@@ -274,6 +280,16 @@ def find_channel_by_trigger(
         logger.debug("find_channel_by_trigger: площадка %r совпадает с узлом %r", trigger.site_name, host_name)
         typed = [ch for ch in site.channels
                  if ch.service and "l2vpn" in ch.service.lower()]
+        if not typed:
+            inet_service = _TYPE_TO_SERVICE["inet"]
+            typed = [ch for ch in site.channels
+                     if ch.service and inet_service in ch.service.lower()]
+            if typed:
+                logger.debug(
+                    "find_channel_by_trigger: у task:%d нет L2VPN-каналов, площадка на Интернет-"
+                    "транспорте — использую Интернет-каналы (%d шт.)",
+                    site.task_id, len(typed),
+                )
 
         # Если известно описание конкретного проблемного канала (пришло из
         # поканальной проверки на устройстве) — сначала пробуем выбрать
@@ -305,15 +321,16 @@ def find_channel_by_trigger(
                 )
                 return by_provider[0]
             logger.debug(
-                "find_channel_by_trigger: провайдер %r из описания %r не найден среди l2vpn-каналов "
-                "площадки (providers=%r) — фолбэк",
+                "find_channel_by_trigger: провайдер %r из описания %r не найден среди подходящих "
+                "каналов площадки (providers=%r) — фолбэк",
                 hint_provider, channel_hint, [ch.provider for ch in typed],
             )
 
         if typed:
             return typed[0]
         logger.debug(
-            "find_channel_by_trigger: у task:%d нет канала со службой l2vpn (services=%r), каналов=%d",
+            "find_channel_by_trigger: у task:%d нет канала со службой l2vpn/интернет (services=%r), "
+            "каналов=%d",
             site.task_id, [ch.service for ch in site.channels], len(site.channels),
         )
         return site.channels[0] if len(site.channels) == 1 else None
