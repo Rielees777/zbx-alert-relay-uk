@@ -192,6 +192,7 @@ PROVIDER_ALIASES: dict[str, str] = {
     # "cortel", "mastertel", "smart") без явного ключа тут молча матчились
     # бы на "Ростелеком" через подстроку "rt" в фолбэке normalize_provider.
     "teledyne":  "Теледайн Системс Лимитед",
+    "geotel":    "Геотел",
     "ertel":     "ЭР-Телеком",
     "zettel":    "ЗЭТ-Телеком Северо-Запад",
     "tattel":    "Таттелеком",
